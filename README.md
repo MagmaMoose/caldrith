@@ -62,7 +62,7 @@ rest.
 ## Behaviour & semantics
 
 Caldrith ingests GitHub webhooks at `POST /` (the App's webhook URL is simply
-`https://api.caldrith.magmamoose.com`). The ingest is deliberately thin: verify the
+`https://caldrith.magmamoose.com`). The ingest is deliberately thin: verify the
 signature over the **raw** body, deduplicate on the
 `X-GitHub-Delivery` id, enqueue a background job, and return `202` — all well
 inside GitHub's 10-second timeout. The heavy reconcile runs in an async
