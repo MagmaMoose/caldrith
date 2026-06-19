@@ -12,6 +12,9 @@ __pycache__
 tests
 k8s
 *.md
+# Keep README.md — pyproject.toml references it (readme = "README.md") and
+# hatchling reads it when building the project during `uv sync`.
+!README.md
 docs
 .dockerignore
 Dockerfile
