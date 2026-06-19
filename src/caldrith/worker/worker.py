@@ -94,7 +94,7 @@ async def reconcile_repo(
             dry_run=dry_run,
             head_sha=head_sha,
         )
-    return bool(summary.changed)
+    return summary.any_changed
 
 
 async def startup(ctx: dict[str, Any]) -> None:

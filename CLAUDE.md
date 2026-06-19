@@ -6,11 +6,12 @@ config-as-code: install the App, create an **admin repo** with
 `.github/settings.yml`, and Caldrith **reconciles** repo settings to match —
 modelled on github/safe-settings.
 
-**P1 scope (narrow):** only the `repository:` block, and within it only three
-fields end-to-end — `allow_auto_merge`, `delete_branch_on_merge`,
-`allow_update_branch`. github.com, Organization **and** User accounts. Everything
-else (branch protection, rulesets, labels, teams, suborgs, GHES, CEL policy) is
-**deferred** — leave clean seams, don't implement.
+**P1 scope (narrow):** the `repository:` block (three fields end-to-end —
+`allow_auto_merge`, `delete_branch_on_merge`, `allow_update_branch`) **and**
+the `branches:` tier (declarative full-replace branch protection; `restrictions`
+and `required_signatures` deferred, schema-rejected). github.com, Organization
+**and** User accounts. Everything else (rulesets, labels, teams, suborgs, GHES,
+CEL policy) is **deferred** — leave clean seams, don't implement.
 
 @.claude/QUICK_START.md
 @.claude/ARCHITECTURE_MAP.md

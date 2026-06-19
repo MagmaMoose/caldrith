@@ -78,12 +78,59 @@ restrictedRepos:
 The built-in exclusions (admin repo, `.github`, archived) apply regardless of
 `restrictedRepos`.
 
+## Branch protection
+
+Add a `branches:` list to protect branches. Each entry has a `name` (a literal
+branch, or `default` to resolve the repo's default branch) and a `protection`
+block. The block is **declarative and full-replace** — it is the *complete* desired
+protection, so fields you omit fall back to GitHub's "off" defaults.
+
+```yaml
+branches:
+  - name: default
+    protection:
+      enforce_admins: true
+      required_linear_history: true
+      allow_force_pushes: false
+      allow_deletions: false
+      required_conversation_resolution: true
+      required_pull_request_reviews:
+        required_approving_review_count: 1
+        dismiss_stale_reviews: true
+        require_code_owner_reviews: true
+      required_status_checks:
+        strict: true
+        contexts: ["ci/build"]
+  - name: release
+    protection: null   # remove protection from this branch
+```
+
+Reconcile is **idempotent**: caldrith canonicalises GitHub's asymmetric API (the
+`GET` wraps booleans as `{enabled: …}`) and only issues a `PUT` when the protection
+actually differs. `protection: null` removes protection.
+
+!!! note "Supported fields"
+    `enforce_admins`, `required_linear_history`, `allow_force_pushes`,
+    `allow_deletions`, `required_conversation_resolution`,
+    `required_pull_request_reviews` (`dismiss_stale_reviews`,
+    `require_code_owner_reviews`, `required_approving_review_count`,
+    `require_last_push_approval`), and `required_status_checks` (`strict`,
+    `contexts`). **Deferred** (and rejected so they don't silently no-op):
+    `restrictions` (push restrictions) and `required_signatures`.
+
+    Because the PUT body always carries `restrictions: null`, any push
+    restrictions set manually on a managed branch are **wiped on the next
+    drift-triggered reconcile** — not on the first run, which no-ops if
+    nothing else changed, but on whichever later PUT does fire. If you rely
+    on push restrictions today, hold off declaring `branches:` for that
+    branch until the deferred `restrictions` block lands.
+
 ## Deferred config tiers
 
-The schema reserves seams for the safe-settings surface that P1 does **not** yet
-implement: branch protection, rulesets, labels, teams, collaborators,
-environments, custom properties, and suborg/repo overlay tiers (present only as a
-stub). These keys may appear in your file and validate, but are not applied yet.
+The schema reserves seams for the safe-settings surface not yet implemented:
+rulesets, labels, teams, collaborators, environments, custom properties, and
+suborg/repo overlay tiers (present only as a stub). These keys may appear in your
+file and validate, but are not applied yet.
 
 ## The generated JSON Schema
 
