@@ -2,6 +2,44 @@
 
 <!-- version list -->
 
+## v1.3.0 (2026-06-19)
+
+### Bug Fixes
+
+- **reconcile**: Guard archived repos in BranchProtectionApplier; drop unreachable default-branch
+  fallback
+  ([`9575771`](https://github.com/MagmaMoose/caldrith/commit/9575771d3735c7ddfde9ab5bbe388ad84bde2b60))
+
+- **reconcile**: One bad branch logs and continues, not aborts the run
+  ([`3293289`](https://github.com/MagmaMoose/caldrith/commit/3293289ab056f8c2b48e4a66fe1b644cb9a4ceab))
+
+- **schema**: Reject required_*_reviews: {} and required_status_checks: {}
+  ([`531b5ab`](https://github.com/MagmaMoose/caldrith/commit/531b5abf89992b6ddb92601eeff1df6ab0c9f828))
+
+### Build System
+
+- **deps**: Bump python from 3.12-slim to 3.14-slim in the docker group
+  ([`1afe592`](https://github.com/MagmaMoose/caldrith/commit/1afe592be0c200f09b607a6801cf770461589ed2))
+
+### Chores
+
+- Update caldrith image
+  ([`9eb87f3`](https://github.com/MagmaMoose/caldrith/commit/9eb87f30f0a45f8ad7939afdb04f58060012bbb9))
+
+### Documentation
+
+- Warn that branches: wipes manual push restrictions; widen P1 scope in CLAUDE.md
+  ([`9f7e9e4`](https://github.com/MagmaMoose/caldrith/commit/9f7e9e41104ed46691818fcdefe71f13c4dcc1f8))
+
+### Features
+
+- Branch protection tier
+  ([`bd0b614`](https://github.com/MagmaMoose/caldrith/commit/bd0b614bb4a27fdfde871d564b6367222649c57b))
+
+- Repository security tier (Dependabot + private vuln reporting)
+  ([`be641bf`](https://github.com/MagmaMoose/caldrith/commit/be641bf55846ae4039892beaaf1d2edca130f7d8))
+
+
 ## v1.2.0 (2026-06-19)
 
 ### Chores
