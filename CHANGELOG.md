@@ -2,6 +2,19 @@
 
 <!-- version list -->
 
+## v1.1.0 (2026-06-19)
+
+### Chores
+
+- Update caldrith image
+  ([`cf75fec`](https://github.com/MagmaMoose/caldrith/commit/cf75feca49de8bba778bf4408a80c1a7dd076b11))
+
+### Features
+
+- Deploy the ARQ reconcile worker
+  ([`a093d77`](https://github.com/MagmaMoose/caldrith/commit/a093d77daad98a6a06ba168a28b4dad04a9be5ca))
+
+
 ## v1.0.3 (2026-06-19)
 
 ### Bug Fixes
