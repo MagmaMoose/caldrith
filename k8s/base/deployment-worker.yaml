@@ -1,26 +1,25 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: caldrith
+  name: caldrith-worker
   labels:
-    app: caldrith
+    app: caldrith-worker
 spec:
   replicas: 1
   strategy:
-    type: Recreate  # Single ingest replica; webhook dedup is centralised in Redis.
+    type: Recreate # Single worker; ARQ pulls jobs from the shared Valkey queue.
   selector:
     matchLabels:
-      app: caldrith
+      app: caldrith-worker
   template:
     metadata:
       labels:
-        app: caldrith
+        # Deliberately NOT `app: caldrith` — the Service selector targets the web
+        # ingest only; the worker has no HTTP listener and must not receive traffic.
+        app: caldrith-worker
     spec:
       securityContext:
         runAsNonRoot: true
-        # Numeric UID/GID so the kubelet can verify non-root. The image's `app`
-        # user is uid/gid 1000; a name (USER app) alone makes runAsNonRoot fail
-        # with "image has non-numeric user (app), cannot verify user is non-root".
         runAsUser: 1000
         runAsGroup: 1000
         seccompProfile:
@@ -28,20 +27,13 @@ spec:
       imagePullSecrets:
         - name: ghcr-pull-secret
       containers:
-        # Web ingest (FastAPI). The heavy reconcile work runs in a separate ARQ
-        # worker Deployment that runs THIS SAME IMAGE with the command overridden:
-        #
-        #   command: ["arq", "caldrith.worker.worker.WorkerSettings"]
-        #
-        # The worker is defined in deployment-worker.yaml (same image, command
-        # overridden to `arq ...`, distinct `app: caldrith-worker` label so the
-        # Service doesn't route to it).
-        - name: caldrith
+        # Reconcile worker: same image as the web ingest, command overridden to run
+        # the ARQ worker, which consumes the jobs the ingest enqueues (per-repo /
+        # per-installation reconcile) and applies settings via the GitHub API.
+        - name: caldrith-worker
           image: ghcr.io/magmamoose/caldrith:latest
           imagePullPolicy: Always
-          ports:
-            - containerPort: 8000
-              name: http
+          command: ["arq", "caldrith.worker.worker.WorkerSettings"]
           # APP_ID / PRIVATE_KEY / WEBHOOK_SECRET come from OCI Vault via the
           # ExternalSecret (see externalsecret.yaml).
           envFrom:
@@ -61,18 +53,9 @@ spec:
               value: "settings.yml"
             - name: LOG_LEVEL
               value: "INFO"
-          readinessProbe:
-            httpGet:
-              path: /readyz
-              port: http
-            initialDelaySeconds: 5
-            periodSeconds: 10
-          livenessProbe:
-            httpGet:
-              path: /healthz
-              port: http
-            initialDelaySeconds: 30
-            periodSeconds: 30
+          # No HTTP probes — this is a queue consumer, not a server. A crashed
+          # worker is restarted by restartPolicy; an `arq --check` exec liveness can
+          # be added once WorkerSettings.health_check_interval is tuned for it.
           resources:
             requests:
               memory: "128Mi"
