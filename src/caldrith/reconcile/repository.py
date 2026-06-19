@@ -52,6 +52,9 @@ class RepositoryApplier:
         """
         # Only consider fields the admin config explicitly set.
         desired_dict = desired.model_dump(exclude_unset=True, exclude_none=True)
+        # `security` is reconciled via dedicated endpoints (reconcile.security), not
+        # repos.update — drop it from the PATCH body.
+        desired_dict.pop("security", None)
         if not desired_dict:
             return ApplyResult(repo=target.full_name, diff=Diff(), applied=False)
 
