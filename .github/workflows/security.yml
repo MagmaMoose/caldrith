@@ -1,0 +1,18 @@
+# Dogfood the org Chargate security gate (MegaLinter net-new gating). On PRs it gates
+# on net-new findings only; on push to main it runs a non-gating baseline scan and
+# ships the full SARIF to the Security tab. Reusable workflow, SHA-pinned.
+name: Security
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+  pull-requests: read
+  security-events: write
+
+jobs:
+  chargate:
+    uses: magmamoose/chargate/.github/workflows/gate.yml@445fd25c95476bc1026955a157c981453a2096cb # v2.1.0
