@@ -125,14 +125,16 @@ class BranchProtectionApplier:
         self._client = client
         self._dry_run = dry_run
 
-    async def _resolve_branch(self, target: TargetRepo, name: str) -> str:
+    async def _get_repo(self, target: TargetRepo) -> dict[str, Any]:
+        return response_json(
+            await self._client.rest.repos.async_get(owner=target.owner, repo=target.name)
+        )
+
+    def _resolve_branch(self, repo: dict[str, Any], name: str) -> str:
         """Resolve ``default`` to the repo's default branch; pass other names through."""
         if name != "default":
             return name
-        repo = response_json(
-            await self._client.rest.repos.async_get(owner=target.owner, repo=target.name)
-        )
-        return repo.get("default_branch") or "main"
+        return repo["default_branch"]
 
     async def _get_protection(self, target: TargetRepo, branch: str) -> dict[str, Any] | None:
         """Return the live protection, or None if the branch is unprotected (404)."""
@@ -151,7 +153,12 @@ class BranchProtectionApplier:
 
     async def apply(self, target: TargetRepo, branch_cfg: BranchConfig) -> BranchResult:
         """Reconcile ``branch_cfg`` on ``target`` (PUT/DELETE unless dry-run)."""
-        branch = await self._resolve_branch(target, branch_cfg.name)
+        repo = await self._get_repo(target)
+        branch = self._resolve_branch(repo, branch_cfg.name)
+        # Archived repos reject branch-protection writes (403/422); treat as a no-op so a
+        # stray webhook on one (bypassing list_target_repos' filter) never errors the job.
+        if repo.get("archived"):
+            return BranchResult(target.full_name, branch, False, False, "noop", None)
         actual = await self._get_protection(target, branch)
 
         if branch_cfg.protection is None:

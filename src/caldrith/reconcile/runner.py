@@ -71,9 +71,7 @@ def _format_check_summary(
 
     lines: list[str] = []
     if changed:
-        lines.append(
-            f"Caldrith would apply repository changes to {len(changed)} repositor(y/ies):"
-        )
+        lines.append(f"Caldrith would apply repository changes to {len(changed)} repositor(y/ies):")
         lines.append("")
         for result in changed:
             lines.append(f"### `{result.repo}`")
@@ -202,7 +200,13 @@ async def run_reconcile(
                 dry_run=dry_run,
             )
         for branch_cfg in branches:
-            branch_result = await branch_applier.apply(target, branch_cfg)
+            try:
+                branch_result = await branch_applier.apply(target, branch_cfg)
+            except Exception as exc:
+                bind_context(log, repo=target.full_name, branch=branch_cfg.name).warning(
+                    "reconcile.branch.failed", error=str(exc), dry_run=dry_run
+                )
+                continue
             branch_results.append(branch_result)
             bind_context(log, repo=branch_result.repo, branch=branch_result.branch).info(
                 "reconcile.branch",
