@@ -10,7 +10,7 @@ keywords = ["github", "github-app", "configuration-as-code", "safe-settings", "f
 dependencies = [
     "fastapi",
     "uvicorn[standard]",
-    "githubkit",
+    "githubkit[auth-app]",
     "arq",
     "redis",
     "pydantic>=2",
