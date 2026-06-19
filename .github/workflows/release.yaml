@@ -1,7 +1,7 @@
 # Caldrith release — single-environment Trunk-Based Development (mono-env).
 #
 # Flow (one long-lived branch: main):
-#   push to main → calebsargeant/semantic-release computes the next STABLE
+#   push to main → diatreme (magmamoose/diatreme) computes the next STABLE
 #                  version from conventional commits since the last tag, bumps
 #                  pyproject.toml [project.version] + src/caldrith/__init__.py
 #                  (__version__), updates CHANGELOG.md, tags vX.Y.Z, publishes the
@@ -9,8 +9,8 @@
 #                  ghcr.io/magmamoose/caldrith (release version + floating major).
 #
 # Caldrith is a long-running FastAPI/ARQ service, so unlike chargate this release
-# also produces a container image (image_name below) — same pattern as
-# diatreme-pro and comment-commander-pro.
+# also produces a container image (image_name below) — Diatreme builds it via its
+# bake support. Diatreme is the evolution of calebsargeant/semantic-release.
 name: Release
 
 on:
@@ -45,7 +45,7 @@ jobs:
       pull-requests: write
       id-token: write   # OIDC for the public-app token broker
     steps:
-      - uses: calebsargeant/semantic-release@f31adec7d62907cc81b9b880cd776e24fcdcbaf1 # v2.0.0
+      - uses: magmamoose/diatreme@538d0fcd353b822f48305b92711133b95113b14d # v1.34.0
         with:
           mode: release
           # Single-environment service: only `prod` exists.
