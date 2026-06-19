@@ -2,6 +2,19 @@
 
 <!-- version list -->
 
+## v1.0.3 (2026-06-19)
+
+### Bug Fixes
+
+- Run as numeric uid 1000 so runAsNonRoot can verify non-root
+  ([`7287e73`](https://github.com/MagmaMoose/caldrith/commit/7287e730d55d8cffdbb6809519b7dbe72805d651))
+
+### Chores
+
+- Update caldrith image
+  ([`3c53788`](https://github.com/MagmaMoose/caldrith/commit/3c53788e4a8510e24aaee81b0bdabaef87199afe))
+
+
 ## v1.0.2 (2026-06-19)
 
 ### Bug Fixes
