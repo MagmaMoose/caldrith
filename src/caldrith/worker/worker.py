@@ -11,6 +11,7 @@ across installations or reused across jobs).
 
 from __future__ import annotations
 
+import os
 from typing import Any, ClassVar
 
 from arq.connections import RedisSettings
@@ -19,7 +20,6 @@ from caldrith.audit.logging import bind_context, configure_logging, get_logger
 from caldrith.auth.client import GitHubClientFactory
 from caldrith.reconcile.planner import list_target_repos
 from caldrith.reconcile.runner import run_reconcile
-from caldrith.settings import get_config
 
 _log = get_logger(__name__)
 
@@ -89,22 +89,16 @@ async def shutdown(ctx: dict[str, Any]) -> None:
     get_logger(__name__).info("worker.shutdown")
 
 
-class _WorkerSettingsMeta(type):
-    """Resolves ``redis_settings`` lazily so importing the module needs no env.
-
-    ARQ reads ``WorkerSettings.redis_settings`` as a class attribute at launch (when
-    the environment is populated); deferring construction to attribute-access time
-    keeps the module importable by tooling/tests that have no ``REDIS_URL``.
-    """
-
-    @property
-    def redis_settings(cls) -> RedisSettings:
-        return RedisSettings.from_dsn(get_config().redis_url)
-
-
-class WorkerSettings(metaclass=_WorkerSettingsMeta):
+class WorkerSettings:
     """ARQ worker entrypoint (``arq caldrith.worker.worker.WorkerSettings``)."""
 
     functions: ClassVar = [reconcile_installation, reconcile_repo]
     on_startup = startup
     on_shutdown = shutdown
+    # ARQ reads settings off the class ``__dict__``, so ``redis_settings`` MUST be a
+    # real class attribute — a metaclass property is invisible to ARQ, which then
+    # silently falls back to redis://localhost:6379. Resolve REDIS_URL at import with
+    # a localhost default: this needs no secrets (unlike get_config(), which requires
+    # APP_ID/PRIVATE_KEY/WEBHOOK_SECRET), so the module stays importable by
+    # tooling/tests while the worker process always has REDIS_URL in its env.
+    redis_settings = RedisSettings.from_dsn(os.environ.get("REDIS_URL", "redis://localhost:6379"))
