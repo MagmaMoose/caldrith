@@ -118,6 +118,13 @@ actually differs. `protection: null` removes protection.
     `contexts`). **Deferred** (and rejected so they don't silently no-op):
     `restrictions` (push restrictions) and `required_signatures`.
 
+    Because the PUT body always carries `restrictions: null`, any push
+    restrictions set manually on a managed branch are **wiped on the next
+    drift-triggered reconcile** — not on the first run, which no-ops if
+    nothing else changed, but on whichever later PUT does fire. If you rely
+    on push restrictions today, hold off declaring `branches:` for that
+    branch until the deferred `restrictions` block lands.
+
 ## Deferred config tiers
 
 The schema reserves seams for the safe-settings surface not yet implemented:
