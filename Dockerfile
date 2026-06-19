@@ -38,7 +38,7 @@ RUN useradd --create-home --home-dir /home/app --shell /usr/sbin/nologin app
 WORKDIR /app
 COPY --from=builder --chown=app:app /app /app
 
-USER app
+USER 1000
 ENV HOME=/home/app
 EXPOSE 8000
 

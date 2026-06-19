@@ -18,6 +18,11 @@ spec:
     spec:
       securityContext:
         runAsNonRoot: true
+        # Numeric UID/GID so the kubelet can verify non-root. The image's `app`
+        # user is uid/gid 1000; a name (USER app) alone makes runAsNonRoot fail
+        # with "image has non-numeric user (app), cannot verify user is non-root".
+        runAsUser: 1000
+        runAsGroup: 1000
         seccompProfile:
           type: RuntimeDefault
       imagePullSecrets:
