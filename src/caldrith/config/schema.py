@@ -20,7 +20,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class RepositorySettings(BaseModel):
@@ -85,6 +85,19 @@ class RequiredStatusChecks(BaseModel):
     strict: bool | None = None
     contexts: list[str] | None = None
 
+    @model_validator(mode="after")
+    def _reject_empty(self) -> RequiredStatusChecks:
+        # An explicitly-present-but-empty block (``required_status_checks: {}``) would
+        # otherwise canonicalise to None and silently read as "no required checks",
+        # which is almost certainly not what the author meant. Force them to declare
+        # at least one field — or omit the block entirely.
+        if all(getattr(self, f) is None for f in type(self).model_fields):
+            raise ValueError(
+                "required_status_checks must set at least one field "
+                "(strict, contexts) — omit the block to mean 'no required checks'."
+            )
+        return self
+
 
 class RequiredPullRequestReviews(BaseModel):
     """``required_pull_request_reviews`` — review requirements before merge."""
@@ -95,6 +108,18 @@ class RequiredPullRequestReviews(BaseModel):
     require_code_owner_reviews: bool | None = None
     required_approving_review_count: int | None = None
     require_last_push_approval: bool | None = None
+
+    @model_validator(mode="after")
+    def _reject_empty(self) -> RequiredPullRequestReviews:
+        # See RequiredStatusChecks._reject_empty — same foot-gun.
+        if all(getattr(self, f) is None for f in type(self).model_fields):
+            raise ValueError(
+                "required_pull_request_reviews must set at least one field "
+                "(dismiss_stale_reviews, require_code_owner_reviews, "
+                "required_approving_review_count, require_last_push_approval) — "
+                "omit the block to mean 'no required reviews'."
+            )
+        return self
 
 
 class BranchProtection(BaseModel):

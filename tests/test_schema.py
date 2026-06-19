@@ -125,6 +125,22 @@ def test_unknown_protection_key_rejected() -> None:
         )
 
 
+def test_empty_required_pull_request_reviews_rejected() -> None:
+    # `required_pull_request_reviews: {}` would otherwise silently mean "reviews off"
+    # after canonicalisation — surface it as an error at parse time instead.
+    with pytest.raises(ValidationError):
+        SafeSettingsConfig.model_validate(
+            {"branches": [{"name": "main", "protection": {"required_pull_request_reviews": {}}}]}
+        )
+
+
+def test_empty_required_status_checks_rejected() -> None:
+    with pytest.raises(ValidationError):
+        SafeSettingsConfig.model_validate(
+            {"branches": [{"name": "main", "protection": {"required_status_checks": {}}}]}
+        )
+
+
 def test_json_schema_available() -> None:
     schema = config_json_schema()
     assert "properties" in schema
