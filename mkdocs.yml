@@ -1,0 +1,45 @@
+site_name: Caldrith
+site_description: >-
+  Multi-tenant GitHub App that enforces GitHub configuration as code —
+  reconcile repository settings from an admin repo's .github/settings.yml.
+repo_url: https://github.com/magmamoose/caldrith
+repo_name: magmamoose/caldrith
+edit_uri: edit/main/docs/
+
+theme:
+  name: material
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: deep purple
+      accent: deep purple
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: deep purple
+      accent: deep purple
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light mode
+  features:
+    - navigation.instant
+    - navigation.sections
+    - navigation.top
+    - content.code.copy
+    - toc.follow
+
+nav:
+  - Home: index.md
+  - Architecture: architecture.md
+  - Configuration: configuration.md
+  - Self-hosting: self-hosting.md
+  - Security: security.md
+
+markdown_extensions:
+  - admonition
+  - pymdownx.superfences
+  - tables
+  - toc:
+      permalink: true

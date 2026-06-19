@@ -1,0 +1,8 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: caldrith
+resources:
+  - ../../base
+images:
+  - name: ghcr.io/magmamoose/caldrith
+    newTag: v0.1.0 # {"$imagepolicy": "flux-system:caldrith:tag"}

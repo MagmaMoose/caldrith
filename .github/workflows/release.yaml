@@ -1,0 +1,58 @@
+# Caldrith release — single-environment Trunk-Based Development (mono-env).
+#
+# Flow (one long-lived branch: main):
+#   push to main → calebsargeant/semantic-release computes the next STABLE
+#                  version from conventional commits since the last tag, bumps
+#                  pyproject.toml [project.version] + src/caldrith/__init__.py
+#                  (__version__), updates CHANGELOG.md, tags vX.Y.Z, publishes the
+#                  GitHub Release, AND builds + pushes the runtime Docker image to
+#                  ghcr.io/magmamoose/caldrith (release version + floating major).
+#
+# Caldrith is a long-running FastAPI/ARQ service, so unlike chargate this release
+# also produces a container image (image_name below) — same pattern as
+# diatreme-pro and comment-commander-pro.
+name: Release
+
+on:
+  push:
+    branches: [main]
+    paths-ignore: ['**.md', '.gitignore', 'LICENSE', 'CHANGELOG.md', 'docs/**']
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: 'Force a bump even if no qualifying conventional commits exist (leave blank to let the tool decide)'
+        required: false
+        type: choice
+        default: ''
+        options:
+          - ''
+          - patch
+          - minor
+          - major
+
+# Serialize releases per ref so two pushes to main can't race the tag write.
+# Never cancel a release mid-flight.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write   # PSR commits the version bump + tag
+      packages: write   # push the container image to ghcr.io/magmamoose/caldrith
+      pull-requests: write
+      id-token: write   # OIDC for the public-app token broker
+    steps:
+      - uses: calebsargeant/semantic-release@770eab62adf2798e6e384bfa1ea2f32488320eeb # v1.33.0
+        with:
+          mode: release
+          # Single-environment service: only `prod` exists.
+          deployment-model: tbd
+          environment: prod
+          environments: '["prod"]'
+          # Builds + pushes ghcr.io/magmamoose/caldrith tagged with the release
+          # version and the floating major.
+          image_name: caldrith
+          force-bump: ${{ inputs.bump || '' }}

@@ -1,0 +1,28 @@
+version: 2
+updates:
+  # GitHub Actions in workflows (CI + release). Grouped into a single weekly PR.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      github-actions:
+        patterns: ['*']
+
+  # Base images referenced by the Dockerfile (uv builder + python:3.12-slim).
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      docker:
+        patterns: ['*']
+
+  # Python runtime + dev dependencies (uv reads pyproject.toml / uv.lock).
+  - package-ecosystem: pip
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      python:
+        patterns: ['*']

@@ -1,0 +1,35 @@
+# Caldrith pre-commit config. Run `pre-commit install` once, then hooks run on
+# every commit. CI gates on `ruff format --check`.
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.6.9  # v0.6.9
+    hooks:
+      - id: ruff
+        args: [--fix]
+      - id: ruff-format
+
+  - repo: https://github.com/astral-sh/uv-pre-commit
+    rev: 0.4.20  # v0.4.20
+    hooks:
+      - id: uv-lock  # fail if uv.lock is out of sync with pyproject.toml
+
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.21.1  # v8.21.1
+    hooks:
+      - id: gitleaks
+
+  - repo: local
+    hooks:
+      # Defence in depth: refuse to commit private keys / plaintext secret files.
+      # Caldrith reads PRIVATE_KEY / WEBHOOK_SECRET from env — they must never
+      # land in the tree (see .claude/COMMON_MISTAKES.md).
+      - id: no-committed-secrets
+        name: block committed .pem / .env secret files
+        entry: >-
+          bash -c 'matches=$(git diff --cached --name-only --diff-filter=A
+          | grep -E "(\.pem$|^\.env($|\.)|/\.env($|\.)|private[_-]?key)" || true);
+          if [ -n "$matches" ]; then
+          echo "Refusing to commit secret-bearing files:"; echo "$matches";
+          exit 1; fi'
+        language: system
+        pass_filenames: false

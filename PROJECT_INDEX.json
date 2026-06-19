@@ -1,0 +1,109 @@
+{
+  "generated": "2026-06-19T00:00:00Z",
+  "summary": "Caldrith is a multi-tenant GitHub App (FastAPI ingest + an ARQ/Redis worker, NOT a CLI or Marketplace Action) that enforces GitHub configuration-as-code modelled on github/safe-settings: install the App, create an admin repo with .github/settings.yml, and Caldrith reconciles repository settings to match. The HTTP ingest path is thin (verify raw-body HMAC -> dedup on X-GitHub-Delivery -> enqueue ARQ job -> 202); heavy reconcile runs in the worker, fanning out one job per repo for full-account syncs. `config/` (schema + loader + diff) is the pure, I/O-free core. P1 enforces ONLY the repository: block's three merge fields (allow_auto_merge, delete_branch_on_merge, allow_update_branch) end-to-end, on github.com Organization AND User accounts.",
+  "entrypoints": [
+    "src/caldrith/api/app.py:create_app (FastAPI factory; uvicorn --factory)",
+    "src/caldrith/worker/worker.py:WorkerSettings (arq worker)",
+    "POST /api/github/webhooks (webhook ingest)",
+    "GET /healthz (liveness), GET /readyz (Redis readiness)"
+  ],
+  "modules": {
+    "__init__": {
+      "path": "src/caldrith/__init__.py",
+      "purpose": "Package docstring + __version__ (bumped only by semantic-release).",
+      "exports": ["__version__"],
+      "depends_on": []
+    },
+    "settings": {
+      "path": "src/caldrith/settings.py",
+      "purpose": "pydantic-settings AppConfig reading env: APP_ID, PRIVATE_KEY (PEM), WEBHOOK_SECRET, REDIS_URL, GITHUB_API_URL (default https://api.github.com), ADMIN_REPO (default 'admin'), CONFIG_PATH (default '.github'), SETTINGS_FILE_PATH (default 'settings.yml').",
+      "exports": ["AppConfig", "get_settings"],
+      "depends_on": []
+    },
+    "api.app": {
+      "path": "src/caldrith/api/app.py",
+      "purpose": "create_app() FastAPI factory; mounts the webhooks router and ratelimit; GET /healthz (no deps), GET /readyz (Redis reachable).",
+      "exports": ["create_app"],
+      "depends_on": ["api.webhooks", "api.ratelimit", "settings", "audit.logging"]
+    },
+    "api.webhooks": {
+      "path": "src/caldrith/api/webhooks.py",
+      "purpose": "POST /api/github/webhooks: read RAW body -> verify signature -> dedup on X-GitHub-Delivery -> enqueue ARQ job -> return 202. Routes push/repository/pull_request to the right job. THIN — no reconcile here.",
+      "exports": ["router"],
+      "depends_on": ["api.security", "worker.queue", "settings", "audit.logging"]
+    },
+    "api.security": {
+      "path": "src/caldrith/api/security.py",
+      "purpose": "verify_signature(secret, body, sig256_header) -> bool using HMAC-SHA256 over the RAW body with hmac.compare_digest. Pure, I/O-free.",
+      "exports": ["verify_signature"],
+      "depends_on": []
+    },
+    "api.ratelimit": {
+      "path": "src/caldrith/api/ratelimit.py",
+      "purpose": "slowapi limiter (per-IP + per-installation), Redis-backed with an in-memory fallback.",
+      "exports": ["limiter", "install_rate_limiter"],
+      "depends_on": ["settings"]
+    },
+    "auth.client": {
+      "path": "src/caldrith/auth/client.py",
+      "purpose": "GitHubClientFactory.for_installation(installation_id, base_url) -> a githubkit GitHub client using AppInstallationAuthStrategy. Builds a NEW client per job; never shares tokens across installations; base_url configurable for GHES.",
+      "exports": ["GitHubClientFactory"],
+      "depends_on": ["settings"]
+    },
+    "config.schema": {
+      "path": "src/caldrith/config/schema.py",
+      "purpose": "PURE. RepositorySettings (the 3 required P1 fields + common optional safe-settings fields) and SafeSettingsConfig(repository: RepositorySettings | None, ...stub deferred tiers). model_json_schema() usable for docs.",
+      "exports": ["RepositorySettings", "SafeSettingsConfig"],
+      "depends_on": []
+    },
+    "config.loader": {
+      "path": "src/caldrith/config/loader.py",
+      "purpose": "load_admin_config(client, owner, admin_repo, config_path, settings_file, ref=None) -> SafeSettingsConfig: fetch file contents via the GitHub API, yaml.safe_load, validate into the pydantic model.",
+      "exports": ["load_admin_config"],
+      "depends_on": ["config.schema"]
+    },
+    "config.diff": {
+      "path": "src/caldrith/config/diff.py",
+      "purpose": "PURE. compare_deep(actual, desired) -> Diff(additions, modifications, deletions, has_changes). Ports safe-settings compareDeep semantics; ignores keys containing 'url' and the set {id, node_id}. I/O-free, idempotency-tested.",
+      "exports": ["compare_deep", "Diff"],
+      "depends_on": []
+    },
+    "reconcile.planner": {
+      "path": "src/caldrith/reconcile/planner.py",
+      "purpose": "List target repos for an installation (account-type aware: Organization vs User) and build a per-repo reconcile plan.",
+      "exports": ["list_target_repos", "build_plan", "ReconcilePlan"],
+      "depends_on": ["config.schema", "auth.client"]
+    },
+    "reconcile.repository": {
+      "path": "src/caldrith/reconcile/repository.py",
+      "purpose": "RepositoryApplier: given desired RepositorySettings + a repo, compute the diff vs live settings and apply via repos.update (or return a NopResult in dry-run / when there are no changes).",
+      "exports": ["RepositoryApplier", "ApplyResult", "NopResult"],
+      "depends_on": ["config.diff", "config.schema", "auth.client"]
+    },
+    "reconcile.runner": {
+      "path": "src/caldrith/reconcile/runner.py",
+      "purpose": "run_reconcile(installation_id, owner, repos=None, dry_run=False, head_sha=None): orchestrate load_admin_config -> plan -> apply/nop. In dry_run, post a GitHub Check Run summarising the diff and mutate nothing.",
+      "exports": ["run_reconcile"],
+      "depends_on": ["config.loader", "reconcile.planner", "reconcile.repository", "auth.client", "audit.logging"]
+    },
+    "worker.worker": {
+      "path": "src/caldrith/worker/worker.py",
+      "purpose": "ARQ WorkerSettings + job funcs reconcile_installation and reconcile_repo; Redis settings derived from REDIS_URL.",
+      "exports": ["WorkerSettings", "reconcile_installation", "reconcile_repo"],
+      "depends_on": ["reconcile.runner", "settings", "audit.logging"]
+    },
+    "worker.queue": {
+      "path": "src/caldrith/worker/queue.py",
+      "purpose": "Enqueue helpers + dedup_delivery(redis, delivery_id) using Redis SETNX with a TTL to drop duplicate webhook deliveries.",
+      "exports": ["enqueue_reconcile_installation", "enqueue_reconcile_repo", "dedup_delivery"],
+      "depends_on": ["settings"]
+    },
+    "audit.logging": {
+      "path": "src/caldrith/audit/logging.py",
+      "purpose": "structlog JSON config + a helper to bind installation_id / delivery_id / repo onto the logger. Never binds credentials.",
+      "exports": ["configure_logging", "bind_context"],
+      "depends_on": []
+    }
+  },
+  "note_for_agents": "Load this file on demand to locate code; it is NOT auto-imported into CLAUDE.md. Design rule: config/ (schema + loader + diff) stays pure — no githubkit, ARQ, FastAPI, or network imports — so the schema and diff are unit-tested with synthetic dicts. Ingest contract: POST /api/github/webhooks verifies the HMAC over the RAW body BEFORE any parse, dedups on X-GitHub-Delivery, enqueues, and returns 202 — no reconcile in the request. Build a NEW githubkit client per installation (AppInstallationAuthStrategy); never share tokens; base_url is configurable for the GHES future. P1 reconciles ONLY repository.{allow_auto_merge, delete_branch_on_merge, allow_update_branch}; PR events are dry-run (Check Run) only. Deferred (clean seams, not implemented): branch protection, rulesets, labels, teams, collaborators, environments, custom properties, suborg/repo overlay tiers, GHES multi-registration, CEL policy. Tests mirror modules 1:1 under tests/."
+}

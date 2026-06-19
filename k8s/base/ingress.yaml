@@ -1,0 +1,25 @@
+# DNS-only Ingress for the Caldrith webhook ingest at api.caldrith.magmamoose.com.
+#
+# This Ingress doesn't route traffic itself — the firefly cloudflared tunnel
+# terminates api.caldrith.magmamoose.com at the in-cluster Service. Before the
+# hostname resolves end-to-end you must, in the infra repo, add the tunnel ingress
+# rule for api.caldrith.magmamoose.com
+# (terraform/cloudflare/zero-trust/prod/tunnels.tf).
+#
+# Its purpose here is to give external-dns-cloudflare a record to publish: the
+# proxied CNAME against the magmamoose.com zone pointing at the tunnel.
+#
+# NO Cloudflare Access policy — GitHub must reach the webhook endpoint
+# unauthenticated; requests are authenticated by HMAC signature verification in
+# the app instead.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: caldrith
+  annotations:
+    external-dns.alpha.kubernetes.io/hostname: "api.caldrith.magmamoose.com"
+    external-dns.alpha.kubernetes.io/target: "7694eb38-c35e-4905-bd2b-16ab7053080a.cfargotunnel.com"
+    external-dns.alpha.kubernetes.io/cloudflare-proxied: "true"
+spec:
+  rules:
+    - host: api.caldrith.magmamoose.com

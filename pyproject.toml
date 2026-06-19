@@ -1,0 +1,88 @@
+[project]
+name = "caldrith"
+version = "0.1.0"
+description = "A public, multi-tenant GitHub App that enforces GitHub configuration-as-code (modeled on github/safe-settings)."
+readme = "README.md"
+requires-python = ">=3.12"
+license = "MIT"
+authors = [{ name = "Caleb Sargeant", email = "caleb@magmamoose.com" }]
+keywords = ["github", "github-app", "configuration-as-code", "safe-settings", "fastapi"]
+dependencies = [
+    "fastapi",
+    "uvicorn[standard]",
+    "githubkit",
+    "arq",
+    "redis",
+    "pydantic>=2",
+    "pydantic-settings",
+    "PyYAML",
+    "structlog",
+    "slowapi",
+]
+
+[project.urls]
+Homepage = "https://github.com/MagmaMoose/caldrith"
+Source = "https://github.com/MagmaMoose/caldrith"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/caldrith"]
+
+[dependency-groups]
+dev = [
+    "pytest>=8",
+    "pytest-asyncio",
+    "ruff",
+    "respx",
+    "fakeredis",
+    "mypy",
+    "types-PyYAML",
+]
+# Docs tooling (non-default group): `uv run --group docs mkdocs serve|build`.
+docs = ["mkdocs-material>=9.5"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+asyncio_mode = "auto"
+addopts = "-ra"
+
+# python-semantic-release (driven by Diatreme on release; see
+# .github/workflows/release.yaml). PSR computes the next stable version from
+# conventional commits since the last tag and writes it to BOTH locations below,
+# so the hatchling package version and `caldrith.__version__` stay in lockstep —
+# do not bump these by hand.
+[tool.semantic_release]
+version_toml = ["pyproject.toml:project.version"]
+version_variables = ["src/caldrith/__init__.py:__version__"]
+build_command = ""          # version-only release: a git tag + GitHub Release, no PyPI build
+major_on_zero = false
+tag_format = "v{version}"
+commit_message = "chore(release): v{version}"
+
+[tool.semantic_release.branches.main]
+match = "(main|master)"
+prerelease = false          # Diatreme controls prerelease via its inputs, not here
+
+[tool.semantic_release.changelog]
+changelog_file = "CHANGELOG.md"
+exclude_commit_patterns = []
+
+[tool.semantic_release.commit_parser_options]
+allowed_tags = ["feat", "fix", "docs", "style", "refactor", "perf", "test", "build", "ci", "chore", "revert"]
+minor_tags = ["feat"]
+patch_tags = ["fix", "perf"]
+
+[tool.semantic_release.remote]
+type = "github"
