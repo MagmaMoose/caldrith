@@ -50,6 +50,7 @@ def bind_context(
     installation_id: int | None = None,
     delivery_id: str | None = None,
     repo: str | None = None,
+    branch: str | None = None,
 ) -> BoundLogger:
     """Bind the standard audit fields onto ``logger``, omitting any that are ``None``."""
     fields: dict[str, object] = {}
@@ -59,4 +60,6 @@ def bind_context(
         fields["delivery_id"] = delivery_id
     if repo is not None:
         fields["repo"] = repo
+    if branch is not None:
+        fields["branch"] = branch
     return logger.bind(**fields)

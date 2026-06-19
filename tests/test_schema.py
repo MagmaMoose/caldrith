@@ -92,6 +92,39 @@ def test_restricted_repos_absent_is_none() -> None:
     assert cfg.restricted_repos is None
 
 
+def test_branches_protection_parses() -> None:
+    cfg = SafeSettingsConfig.model_validate(
+        {
+            "branches": [
+                {
+                    "name": "main",
+                    "protection": {
+                        "enforce_admins": True,
+                        "required_status_checks": {"strict": True, "contexts": ["ci/build"]},
+                        "required_pull_request_reviews": {"required_approving_review_count": 2},
+                    },
+                },
+                {"name": "release", "protection": None},
+            ]
+        }
+    )
+    assert cfg.branches is not None
+    assert cfg.branches[0].name == "main"
+    assert cfg.branches[0].protection is not None
+    assert cfg.branches[0].protection.enforce_admins is True
+    assert cfg.branches[0].protection.required_status_checks is not None
+    assert cfg.branches[0].protection.required_status_checks.contexts == ["ci/build"]
+    assert cfg.branches[1].protection is None  # remove-protection entry
+
+
+def test_unknown_protection_key_rejected() -> None:
+    # restrictions/required_signatures are deferred — typos and unsupported keys fail loudly.
+    with pytest.raises(ValidationError):
+        SafeSettingsConfig.model_validate(
+            {"branches": [{"name": "main", "protection": {"restrictions": {}}}]}
+        )
+
+
 def test_json_schema_available() -> None:
     schema = config_json_schema()
     assert "properties" in schema

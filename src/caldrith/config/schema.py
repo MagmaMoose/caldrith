@@ -77,6 +77,60 @@ class RestrictedRepos(BaseModel):
     exclude: list[str] | None = None
 
 
+class RequiredStatusChecks(BaseModel):
+    """``required_status_checks`` — required CI contexts and strict (up-to-date) mode."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    strict: bool | None = None
+    contexts: list[str] | None = None
+
+
+class RequiredPullRequestReviews(BaseModel):
+    """``required_pull_request_reviews`` — review requirements before merge."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    dismiss_stale_reviews: bool | None = None
+    require_code_owner_reviews: bool | None = None
+    required_approving_review_count: int | None = None
+    require_last_push_approval: bool | None = None
+
+
+class BranchProtection(BaseModel):
+    """Desired protection for a branch (the safe-settings ``protection:`` block).
+
+    Declarative + full-replace: the block is the COMPLETE desired protection, so
+    omitted fields fall back to GitHub's "off" defaults (no required reviews,
+    ``enforce_admins=false``, force-pushes allowed, ...). Only the fields below are
+    supported; ``restrictions`` (push restrictions) and ``required_signatures``
+    (a separate endpoint) are deferred and rejected (``extra="forbid"``) so they
+    never silently no-op.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    required_status_checks: RequiredStatusChecks | None = None
+    enforce_admins: bool | None = None
+    required_pull_request_reviews: RequiredPullRequestReviews | None = None
+    required_linear_history: bool | None = None
+    allow_force_pushes: bool | None = None
+    allow_deletions: bool | None = None
+    required_conversation_resolution: bool | None = None
+
+
+class BranchConfig(BaseModel):
+    """A ``branches:`` entry: a branch ``name`` (or ``default``) and its ``protection``.
+
+    ``protection: null`` (or omitted) removes branch protection from the branch.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str
+    protection: BranchProtection | None = None
+
+
 class SafeSettingsConfig(BaseModel):
     """Top-level ``settings.yml`` document.
 
@@ -98,7 +152,7 @@ class SafeSettingsConfig(BaseModel):
     )
 
     # --- DEFERRED seams: accepted-but-unused. Typed loosely on purpose. ---
-    branches: Any | None = None  # branch protection — DEFERRED
+    branches: list[BranchConfig] | None = None  # branch protection
     rulesets: Any | None = None  # repo/org rulesets — DEFERRED
     labels: Any | None = None  # DEFERRED
     teams: Any | None = None  # DEFERRED
