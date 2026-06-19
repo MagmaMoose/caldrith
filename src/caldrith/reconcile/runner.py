@@ -1,10 +1,10 @@
 """Top-level reconcile orchestration.
 
 ``run_reconcile`` loads the admin config, selects the target repos, and applies the
-``repository`` block and any ``branches`` protection to each (or computes a dry-run
-diff). In dry-run mode it posts a GitHub Check Run summarizing the changes and mutates
-nothing — this backs the ``pull_request`` webhook flow where a proposed settings change
-on a non-default branch is previewed as a check.
+``repository`` block, ``repository.security`` toggles, and any ``branches`` protection
+to each (or computes a dry-run diff). In dry-run mode it posts a GitHub Check Run
+summarizing the changes and mutates nothing — this backs the ``pull_request`` webhook
+flow where a proposed settings change on a non-default branch is previewed as a check.
 """
 
 from __future__ import annotations
@@ -19,6 +19,7 @@ from caldrith.config.schema import RepositorySettings
 from caldrith.reconcile.branch import BranchProtectionApplier, BranchResult
 from caldrith.reconcile.planner import TargetRepo, list_target_repos
 from caldrith.reconcile.repository import ApplyResult, RepositoryApplier
+from caldrith.reconcile.security import RepositorySecurityApplier, SecurityResult
 from caldrith.reconcile.selection import select_targets
 from caldrith.settings import AppConfig, get_config
 
@@ -36,6 +37,7 @@ class ReconcileSummary:
     dry_run: bool
     results: list[ApplyResult]
     branch_results: list[BranchResult] = field(default_factory=list)
+    security_results: list[SecurityResult] = field(default_factory=list)
 
     @property
     def changed(self) -> list[ApplyResult]:
@@ -47,15 +49,24 @@ class ReconcileSummary:
 
     @property
     def any_changed(self) -> bool:
-        """True if any repository OR branch-protection change was detected."""
-        return bool(self.changed) or any(b.changed for b in self.branch_results)
+        """True if any repository, security, or branch-protection change was detected."""
+        return (
+            bool(self.changed)
+            or any(b.changed for b in self.branch_results)
+            or any(s.changed for s in self.security_results)
+        )
 
 
-def _format_check_summary(results: list[ApplyResult], branch_results: list[BranchResult]) -> str:
+def _format_check_summary(
+    results: list[ApplyResult],
+    branch_results: list[BranchResult],
+    security_results: list[SecurityResult],
+) -> str:
     """Render a Markdown summary of pending changes for a Check Run body."""
     changed = [r for r in results if r.has_changes]
     changed_branches = [b for b in branch_results if b.changed]
-    if not changed and not changed_branches:
+    changed_security = [s for s in security_results if s.changed]
+    if not changed and not changed_branches and not changed_security:
         return "No configuration changes. All repositories match the desired state."
 
     lines: list[str] = []
@@ -68,6 +79,12 @@ def _format_check_summary(results: list[ApplyResult], branch_results: list[Branc
             for key in sorted(payload):
                 lines.append(f"- `{key}` -> `{payload[key]!r}`")
             lines.append("")
+    if changed_security:
+        lines.append(f"Security toggles on {len(changed_security)} repositor(y/ies):")
+        lines.append("")
+        for security in changed_security:
+            lines.append(f"- `{security.repo}`: {', '.join(security.changed_fields)}")
+        lines.append("")
     if changed_branches:
         lines.append(f"Branch protection changes on {len(changed_branches)} branch(es):")
         lines.append("")
@@ -83,6 +100,7 @@ async def _post_check_run(
     head_sha: str,
     results: list[ApplyResult],
     branch_results: list[BranchResult],
+    security_results: list[SecurityResult],
 ) -> None:
     """Post a dry-run Check Run to the admin repo summarizing the diff.
 
@@ -91,7 +109,7 @@ async def _post_check_run(
     PR, it only surfaces what *would* change.
     """
     config = get_config()
-    summary = _format_check_summary(results, branch_results)
+    summary = _format_check_summary(results, branch_results, security_results)
     await client.rest.checks.async_create(
         owner=owner,
         repo=config.admin_repo,
@@ -120,10 +138,11 @@ async def run_reconcile(
 ) -> ReconcileSummary:
     """Reconcile ``owner``'s repositories against the admin config.
 
-    Applies the ``repository`` block and any ``branches`` protection. When ``repos`` is
-    given (a single repo from a ``repository`` webhook) only those repos are targeted;
-    otherwise every accessible, non-excluded repo is. In ``dry_run`` mode no mutations
-    are issued and (with ``head_sha``) a Check Run is posted.
+    Applies the ``repository`` block, ``repository.security`` toggles, and any
+    ``branches`` protection. When ``repos`` is given (a single repo from a
+    ``repository`` webhook) only those repos are targeted; otherwise every accessible,
+    non-excluded repo is. In ``dry_run`` mode no mutations are issued and (with
+    ``head_sha``) a Check Run is posted.
     """
     cfg = config or get_config()
     log = bind_context(_log, installation_id=installation_id)
@@ -140,12 +159,14 @@ async def run_reconcile(
 
     desired_repository: RepositorySettings | None = settings_config.repository
     branches = settings_config.branches or []
+    desired_security = desired_repository.security if desired_repository else None
     results: list[ApplyResult] = []
     branch_results: list[BranchResult] = []
+    security_results: list[SecurityResult] = []
 
     if desired_repository is None and not branches:
         log.info("reconcile.nothing_to_do", owner=owner, dry_run=dry_run)
-        return ReconcileSummary(installation_id, owner, dry_run, results, branch_results)
+        return ReconcileSummary(installation_id, owner, dry_run, results)
 
     if repos is not None:
         targets = [TargetRepo(owner=owner, name=name) for name in repos]
@@ -157,6 +178,7 @@ async def run_reconcile(
     )
 
     repo_applier = RepositoryApplier(client, dry_run=dry_run)
+    security_applier = RepositorySecurityApplier(client, dry_run=dry_run)
     branch_applier = BranchProtectionApplier(client, dry_run=dry_run)
     for target in targets:
         if desired_repository is not None:
@@ -166,6 +188,15 @@ async def run_reconcile(
                 "reconcile.repo",
                 applied=result.applied,
                 has_changes=result.has_changes,
+                dry_run=dry_run,
+            )
+        if desired_security is not None:
+            security_result = await security_applier.apply(target, desired_security)
+            security_results.append(security_result)
+            bind_context(log, repo=security_result.repo).info(
+                "reconcile.security",
+                changed_fields=security_result.changed_fields,
+                applied=security_result.applied,
                 dry_run=dry_run,
             )
         for branch_cfg in branches:
@@ -186,6 +217,8 @@ async def run_reconcile(
             )
 
     if dry_run and head_sha is not None:
-        await _post_check_run(client, owner, head_sha, results, branch_results)
+        await _post_check_run(client, owner, head_sha, results, branch_results, security_results)
 
-    return ReconcileSummary(installation_id, owner, dry_run, results, branch_results)
+    return ReconcileSummary(
+        installation_id, owner, dry_run, results, branch_results, security_results
+    )

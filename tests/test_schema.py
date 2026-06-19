@@ -92,6 +92,25 @@ def test_restricted_repos_absent_is_none() -> None:
     assert cfg.restricted_repos is None
 
 
+def test_repository_security_parses_camelcase() -> None:
+    cfg = SafeSettingsConfig.model_validate(
+        {
+            "repository": {
+                "security": {
+                    "enableVulnerabilityAlerts": True,
+                    "enableAutomatedSecurityFixes": True,
+                    "enablePrivateVulnerabilityReporting": False,
+                }
+            }
+        }
+    )
+    assert cfg.repository is not None
+    assert cfg.repository.security is not None
+    assert cfg.repository.security.enable_vulnerability_alerts is True
+    assert cfg.repository.security.enable_automated_security_fixes is True
+    assert cfg.repository.security.enable_private_vulnerability_reporting is False
+
+
 def test_branches_protection_parses() -> None:
     cfg = SafeSettingsConfig.model_validate(
         {

@@ -23,6 +23,26 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
+class RepositorySecurity(BaseModel):
+    """``repository.security`` — Dependabot + private vulnerability reporting toggles.
+
+    Applied via dedicated GitHub endpoints (not ``repos.update``); see
+    :mod:`caldrith.reconcile.security`. Field names mirror github/safe-settings.
+    """
+
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+    enable_vulnerability_alerts: bool | None = Field(
+        default=None, alias="enableVulnerabilityAlerts"
+    )
+    enable_automated_security_fixes: bool | None = Field(
+        default=None, alias="enableAutomatedSecurityFixes"
+    )
+    enable_private_vulnerability_reporting: bool | None = Field(
+        default=None, alias="enablePrivateVulnerabilityReporting"
+    )
+
+
 class RepositorySettings(BaseModel):
     """The ``repository:`` block of ``settings.yml``.
 
@@ -62,6 +82,11 @@ class RepositorySettings(BaseModel):
     archived: bool | None = None
     is_template: bool | None = None
     topics: list[str] | None = None
+
+    # Repository security toggles (Dependabot + private vuln reporting). Applied via
+    # dedicated endpoints, NOT repos.update — see reconcile.security. Held here for
+    # safe-settings compatibility (the block nests under `repository:`).
+    security: RepositorySecurity | None = None
 
 
 class RestrictedRepos(BaseModel):

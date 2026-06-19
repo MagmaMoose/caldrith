@@ -78,6 +78,24 @@ restrictedRepos:
 The built-in exclusions (admin repo, `.github`, archived) apply regardless of
 `restrictedRepos`.
 
+## Repository security
+
+A `repository.security` block toggles the repo's Dependabot and reporting switches.
+These are read and flipped only on drift (idempotent), via dedicated GitHub
+endpoints (not `repos.update`):
+
+```yaml
+repository:
+  security:
+    enableVulnerabilityAlerts: true            # Dependabot alerts
+    enableAutomatedSecurityFixes: true         # Dependabot security updates
+    enablePrivateVulnerabilityReporting: true  # private vulnerability reporting
+```
+
+Each is optional — omit a key to leave that toggle untouched. (Vulnerability alerts
+are reconciled first, since automated security fixes depend on them.) Secret scanning
+and push protection (`security_and_analysis`) are a later slice.
+
 ## Branch protection
 
 Add a `branches:` list to protect branches. Each entry has a `name` (a literal
