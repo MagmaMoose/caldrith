@@ -45,7 +45,7 @@ jobs:
       pull-requests: write
       id-token: write   # OIDC for the public-app token broker
     steps:
-      - uses: calebsargeant/semantic-release@770eab62adf2798e6e384bfa1ea2f32488320eeb # v1.33.0
+      - uses: calebsargeant/semantic-release@f31adec7d62907cc81b9b880cd776e24fcdcbaf1 # v2.0.0
         with:
           mode: release
           # Single-environment service: only `prod` exists.
