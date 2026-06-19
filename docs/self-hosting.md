@@ -7,7 +7,7 @@ Caldrith is a long-running service (FastAPI ingest + an ARQ/Redis worker). You r
 
 Create a GitHub App on github.com with:
 
-- **Webhook URL** pointing at your deployment's `POST /api/github/webhooks`.
+- **Webhook URL** pointing at your deployment's `POST /`.
 - **Webhook secret** — a strong random string (becomes `WEBHOOK_SECRET`).
 - **Permissions** (P1): repository **Administration** read/write (to update
   settings), **Contents** read (to fetch the admin repo's `settings.yml`), and

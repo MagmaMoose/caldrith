@@ -29,7 +29,7 @@ spec:
         #   command: ["arq", "caldrith.worker.worker.WorkerSettings"]
         #
         # The worker needs the same envFrom secret (APP_ID/PRIVATE_KEY/
-        # WEBHOOK_SECRET/REDIS_URL) and the same securityContext, but NO ingress,
+        # WEBHOOK_SECRET) and the same REDIS_URL env + securityContext, but NO ingress,
         # Service, or HTTP probes. It is intentionally not yet defined here — add a
         # second Deployment (e.g. deployment-worker.yaml) when reconcile load
         # justifies a dedicated worker pod.
@@ -39,12 +39,15 @@ spec:
           ports:
             - containerPort: 8000
               name: http
-          # APP_ID / PRIVATE_KEY / WEBHOOK_SECRET / REDIS_URL come from OCI Vault
-          # via the ExternalSecret (see externalsecret.yaml).
+          # APP_ID / PRIVATE_KEY / WEBHOOK_SECRET come from OCI Vault via the
+          # ExternalSecret (see externalsecret.yaml).
           envFrom:
             - secretRef:
                 name: caldrith
           env:
+            # In-cluster Valkey, no auth — not a secret, so set here, not in Vault.
+            - name: REDIS_URL
+              value: "redis://valkey.database.svc.cluster.local:6379"
             - name: GITHUB_API_URL
               value: "https://api.github.com"
             - name: ADMIN_REPO

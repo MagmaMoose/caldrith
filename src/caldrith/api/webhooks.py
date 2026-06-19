@@ -34,7 +34,7 @@ from caldrith.worker.queue import (
     enqueue_reconcile_repo,
 )
 
-router = APIRouter(prefix="/api/github", tags=["webhooks"])
+router = APIRouter(tags=["webhooks"])
 _log = get_logger(__name__)
 
 
@@ -125,7 +125,7 @@ async def _handle_pull_request(arq_redis: Any, payload: dict, installation_id: i
     )
 
 
-@router.post("/webhooks", status_code=HTTP_202_ACCEPTED)
+@router.post("/", status_code=HTTP_202_ACCEPTED)
 async def receive_webhook(
     request: Request,
     response: Response,

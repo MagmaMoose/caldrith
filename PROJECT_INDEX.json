@@ -4,7 +4,7 @@
   "entrypoints": [
     "src/caldrith/api/app.py:create_app (FastAPI factory; uvicorn --factory)",
     "src/caldrith/worker/worker.py:WorkerSettings (arq worker)",
-    "POST /api/github/webhooks (webhook ingest)",
+    "POST / (webhook ingest)",
     "GET /healthz (liveness), GET /readyz (Redis readiness)"
   ],
   "modules": {
@@ -28,7 +28,7 @@
     },
     "api.webhooks": {
       "path": "src/caldrith/api/webhooks.py",
-      "purpose": "POST /api/github/webhooks: read RAW body -> verify signature -> dedup on X-GitHub-Delivery -> enqueue ARQ job -> return 202. Routes push/repository/pull_request to the right job. THIN — no reconcile here.",
+      "purpose": "POST /: read RAW body -> verify signature -> dedup on X-GitHub-Delivery -> enqueue ARQ job -> return 202. Routes push/repository/pull_request to the right job. THIN — no reconcile here.",
       "exports": ["router"],
       "depends_on": ["api.security", "worker.queue", "settings", "audit.logging"]
     },
@@ -105,5 +105,5 @@
       "depends_on": []
     }
   },
-  "note_for_agents": "Load this file on demand to locate code; it is NOT auto-imported into CLAUDE.md. Design rule: config/ (schema + loader + diff) stays pure — no githubkit, ARQ, FastAPI, or network imports — so the schema and diff are unit-tested with synthetic dicts. Ingest contract: POST /api/github/webhooks verifies the HMAC over the RAW body BEFORE any parse, dedups on X-GitHub-Delivery, enqueues, and returns 202 — no reconcile in the request. Build a NEW githubkit client per installation (AppInstallationAuthStrategy); never share tokens; base_url is configurable for the GHES future. P1 reconciles ONLY repository.{allow_auto_merge, delete_branch_on_merge, allow_update_branch}; PR events are dry-run (Check Run) only. Deferred (clean seams, not implemented): branch protection, rulesets, labels, teams, collaborators, environments, custom properties, suborg/repo overlay tiers, GHES multi-registration, CEL policy. Tests mirror modules 1:1 under tests/."
+  "note_for_agents": "Load this file on demand to locate code; it is NOT auto-imported into CLAUDE.md. Design rule: config/ (schema + loader + diff) stays pure — no githubkit, ARQ, FastAPI, or network imports — so the schema and diff are unit-tested with synthetic dicts. Ingest contract: POST / verifies the HMAC over the RAW body BEFORE any parse, dedups on X-GitHub-Delivery, enqueues, and returns 202 — no reconcile in the request. Build a NEW githubkit client per installation (AppInstallationAuthStrategy); never share tokens; base_url is configurable for the GHES future. P1 reconciles ONLY repository.{allow_auto_merge, delete_branch_on_merge, allow_update_branch}; PR events are dry-run (Check Run) only. Deferred (clean seams, not implemented): branch protection, rulesets, labels, teams, collaborators, environments, custom properties, suborg/repo overlay tiers, GHES multi-registration, CEL policy. Tests mirror modules 1:1 under tests/."
 }
