@@ -2,6 +2,19 @@
 
 <!-- version list -->
 
+## v1.2.0 (2026-06-19)
+
+### Chores
+
+- Update caldrith image
+  ([`bb0cf21`](https://github.com/MagmaMoose/caldrith/commit/bb0cf21bf27b232873f66e5c1120668d091251e1))
+
+### Features
+
+- Repo selection — restrictedRepos, exclude admin/.github, skip archived
+  ([`4899d5f`](https://github.com/MagmaMoose/caldrith/commit/4899d5f2993c2eb577160b6815af1349b9ec9d55))
+
+
 ## v1.1.2 (2026-06-19)
 
 ### Bug Fixes
