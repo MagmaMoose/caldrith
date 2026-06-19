@@ -20,7 +20,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class RepositorySettings(BaseModel):
@@ -64,6 +64,19 @@ class RepositorySettings(BaseModel):
     topics: list[str] | None = None
 
 
+class RestrictedRepos(BaseModel):
+    """Object form of ``restrictedRepos`` — glob-based repo selection.
+
+    ``include`` is an allowlist (when set, only repos matching it are managed);
+    ``exclude`` skips repos matching it. Patterns are minimatch-style globs.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    include: list[str] | None = None
+    exclude: list[str] | None = None
+
+
 class SafeSettingsConfig(BaseModel):
     """Top-level ``settings.yml`` document.
 
@@ -73,9 +86,16 @@ class SafeSettingsConfig(BaseModel):
     real models as each feature lands.
     """
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
     repository: RepositorySettings | None = None
+
+    # Which repos this installation manages. A list of globs excludes matching repos;
+    # an object {include, exclude} allowlists/denies by glob. The admin repo and
+    # `.github` are always excluded regardless (see reconcile.selection).
+    restricted_repos: list[str] | RestrictedRepos | None = Field(
+        default=None, alias="restrictedRepos"
+    )
 
     # --- DEFERRED seams: accepted-but-unused. Typed loosely on purpose. ---
     branches: Any | None = None  # branch protection — DEFERRED

@@ -18,8 +18,11 @@ from arq.connections import RedisSettings
 
 from caldrith.audit.logging import bind_context, configure_logging, get_logger
 from caldrith.auth.client import GitHubClientFactory
+from caldrith.config.loader import load_admin_config
 from caldrith.reconcile.planner import list_target_repos
 from caldrith.reconcile.runner import run_reconcile
+from caldrith.reconcile.selection import select_targets
+from caldrith.settings import get_config
 
 _log = get_logger(__name__)
 
@@ -36,10 +39,27 @@ async def reconcile_installation(
     """
     factory: GitHubClientFactory = ctx["client_factory"]
     arq_redis = ctx["redis"]
+    config = get_config()
     log = bind_context(_log, installation_id=installation_id)
 
     async with factory.for_installation(installation_id) as client:
-        targets = await list_target_repos(client)
+        settings_config = await load_admin_config(
+            client,
+            owner=owner,
+            admin_repo=config.admin_repo,
+            config_path=config.config_path,
+            settings_file=config.settings_file_path,
+        )
+        # Nothing to enforce if there's no repository block — skip the fan-out.
+        if settings_config.repository is None:
+            log.info("reconcile_installation.no_repository_block", owner=owner)
+            return 0
+        all_targets = await list_target_repos(client)
+        targets = select_targets(
+            all_targets,
+            admin_repo=config.admin_repo,
+            restricted=settings_config.restricted_repos,
+        )
 
     for target in targets:
         await arq_redis.enqueue_job(

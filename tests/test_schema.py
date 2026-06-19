@@ -8,6 +8,7 @@ from pydantic import ValidationError
 
 from caldrith.config.schema import (
     RepositorySettings,
+    RestrictedRepos,
     SafeSettingsConfig,
     config_json_schema,
 )
@@ -70,6 +71,25 @@ repository:
     cfg = SafeSettingsConfig.model_validate(yaml.safe_load(raw))
     assert cfg.repository is not None
     assert cfg.repository.has_issues is True
+
+
+def test_restricted_repos_list_form() -> None:
+    cfg = SafeSettingsConfig.model_validate({"restrictedRepos": ["legacy-*", "tmp"]})
+    assert cfg.restricted_repos == ["legacy-*", "tmp"]
+
+
+def test_restricted_repos_object_form() -> None:
+    cfg = SafeSettingsConfig.model_validate(
+        {"restrictedRepos": {"include": ["svc-*"], "exclude": ["svc-old"]}}
+    )
+    assert isinstance(cfg.restricted_repos, RestrictedRepos)
+    assert cfg.restricted_repos.include == ["svc-*"]
+    assert cfg.restricted_repos.exclude == ["svc-old"]
+
+
+def test_restricted_repos_absent_is_none() -> None:
+    cfg = SafeSettingsConfig.model_validate({"repository": {"allow_auto_merge": True}})
+    assert cfg.restricted_repos is None
 
 
 def test_json_schema_available() -> None:

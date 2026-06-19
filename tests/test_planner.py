@@ -62,6 +62,28 @@ async def test_list_target_repos_paginates() -> None:
 
 
 @respx.mock
+async def test_list_target_repos_skips_archived() -> None:
+    respx.get("https://api.github.com/installation/repositories").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "total_count": 3,
+                "repositories": [
+                    _repo("acme", "active"),
+                    {**_repo("acme", "old"), "archived": True},
+                    _repo("acme", "fresh"),
+                ],
+            },
+        )
+    )
+
+    async with GitHub("token") as client:
+        targets = await list_target_repos(client)
+
+    assert targets == [TargetRepo("acme", "active"), TargetRepo("acme", "fresh")]
+
+
+@respx.mock
 async def test_account_type_resolved() -> None:
     respx.get("https://api.github.com/app/installations/42").mock(
         return_value=httpx.Response(

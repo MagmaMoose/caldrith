@@ -60,6 +60,9 @@ async def list_target_repos(client: GitHub) -> list[TargetRepo]:
         )
         repositories = response_json(response).get("repositories") or []
         for repo in repositories:
+            # Archived repos reject settings PATCHes (403/422); never target them.
+            if repo.get("archived"):
+                continue
             targets.append(TargetRepo(owner=repo["owner"]["login"], name=repo["name"]))
         if len(repositories) < per_page:
             break
