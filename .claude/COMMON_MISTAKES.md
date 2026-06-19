@@ -1,6 +1,6 @@
 # Common mistakes & footguns
 
-- **Keep the ingest path THIN.** `POST /api/github/webhooks` only verifies,
+- **Keep the ingest path THIN.** `POST /` only verifies,
   dedups, enqueues, and returns `202` — all under GitHub's 10s timeout. **No**
   reconcile, no GitHub API calls in the request handler. Heavy work runs in the
   ARQ worker; full-account syncs fan out one job per repo.

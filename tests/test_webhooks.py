@@ -65,7 +65,7 @@ def _post(client: TestClient, payload: dict, *, event: str, delivery: str) -> An
     body = json.dumps(payload).encode()
     sig = "sha256=" + hmac.new(b"test-secret", body, hashlib.sha256).hexdigest()
     return client.post(
-        "/api/github/webhooks",
+        "/",
         content=body,
         headers={
             "X-GitHub-Event": event,
@@ -90,7 +90,7 @@ def test_readyz_ok_when_redis_reachable(client: TestClient) -> None:
 def test_invalid_signature_rejected(client: TestClient) -> None:
     body = json.dumps({"installation": {"id": 1}}).encode()
     resp = client.post(
-        "/api/github/webhooks",
+        "/",
         content=body,
         headers={
             "X-GitHub-Event": "push",

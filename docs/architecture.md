@@ -26,7 +26,7 @@ src/caldrith/
   settings.py              # pydantic-settings AppConfig (env: APP_ID, PRIVATE_KEY, …)
   api/
     app.py                 # create_app() factory; GET /healthz, GET /readyz
-    webhooks.py            # POST /api/github/webhooks: raw -> verify -> dedup -> enqueue -> 202
+    webhooks.py            # POST /: raw -> verify -> dedup -> enqueue -> 202
     security.py            # verify_signature() — hmac.compare_digest over RAW body
     ratelimit.py           # slowapi limiter (per-IP + per-installation)
   auth/

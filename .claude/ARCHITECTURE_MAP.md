@@ -6,7 +6,7 @@ design splits into a **pure core** (config schema + diff — no I/O) and the
 
 ## The ingest contract (keep it THIN)
 
-`POST /api/github/webhooks` must finish well inside GitHub's 10s timeout:
+`POST /` must finish well inside GitHub's 10s timeout:
 read **raw** body → **verify** HMAC-SHA256 over those bytes → **dedup** on
 `X-GitHub-Delivery` (Redis `SETNX`+TTL) → **enqueue** an ARQ job → **`202`**.
 No reconcile in the request. Full-account syncs **fan out one job per repo**.
