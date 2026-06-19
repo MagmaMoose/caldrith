@@ -2,6 +2,19 @@
 
 <!-- version list -->
 
+## v1.1.2 (2026-06-19)
+
+### Bug Fixes
+
+- Install cryptography via githubkit[auth-app] for RS256 app auth
+  ([`ea8a527`](https://github.com/MagmaMoose/caldrith/commit/ea8a52721072ced4c0919704ee36dfd3158a3eb6))
+
+### Chores
+
+- Update caldrith image
+  ([`e24171c`](https://github.com/MagmaMoose/caldrith/commit/e24171cc64ff33191ed7d7b73c63f896b4e449e9))
+
+
 ## v1.1.1 (2026-06-19)
 
 ### Bug Fixes
