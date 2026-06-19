@@ -18,6 +18,7 @@ from caldrith.config.loader import load_admin_config
 from caldrith.config.schema import RepositorySettings
 from caldrith.reconcile.planner import TargetRepo, list_target_repos
 from caldrith.reconcile.repository import ApplyResult, RepositoryApplier
+from caldrith.reconcile.selection import select_targets
 from caldrith.settings import AppConfig, get_config
 
 _log = get_logger(__name__)
@@ -136,6 +137,12 @@ async def run_reconcile(
         targets = [TargetRepo(owner=owner, name=name) for name in repos]
     else:
         targets = await list_target_repos(client)
+
+    # Drop repos this installation must not manage (admin/.github + restrictedRepos),
+    # so even a direct event on an excluded repo is a no-op.
+    targets = select_targets(
+        targets, admin_repo=cfg.admin_repo, restricted=settings_config.restricted_repos
+    )
 
     applier = RepositoryApplier(client, dry_run=dry_run)
     for target in targets:

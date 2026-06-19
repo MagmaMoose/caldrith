@@ -92,6 +92,27 @@ async def test_dry_run_never_patches() -> None:
     assert result.has_changes is True  # diff is still computed for the check run
 
 
+@respx.mock
+async def test_archived_repo_is_noop() -> None:
+    respx.get("https://api.github.com/repos/acme/widget").mock(
+        return_value=httpx.Response(200, json=_repo_json(archived=True))
+    )
+    patch = respx.patch("https://api.github.com/repos/acme/widget").mock(
+        return_value=httpx.Response(200, json=_repo_json())
+    )
+
+    async with GitHub("token") as client:
+        applier = RepositoryApplier(client)
+        result = await applier.apply(
+            TargetRepo("acme", "widget"),
+            RepositorySettings(allow_auto_merge=True),
+        )
+
+    assert not patch.called  # archived repos can't be PATCHed -> skip
+    assert result.applied is False
+    assert result.has_changes is False
+
+
 async def test_empty_desired_is_noop() -> None:
     async with GitHub("token") as client:
         applier = RepositoryApplier(client)

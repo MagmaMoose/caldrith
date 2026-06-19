@@ -58,6 +58,11 @@ class RepositoryApplier:
         live = await self._client.rest.repos.async_get(owner=target.owner, repo=target.name)
         actual = response_json(live)
 
+        # Archived repos reject settings PATCHes (403/422); treat as a no-op so a
+        # stray event on one (or one slipping past selection) never errors the job.
+        if actual.get("archived"):
+            return ApplyResult(repo=target.full_name, diff=Diff(), applied=False)
+
         diff = compare_deep(actual=actual, desired=desired_dict)
 
         if not diff.has_changes or self._dry_run:

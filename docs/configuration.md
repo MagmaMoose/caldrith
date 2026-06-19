@@ -48,6 +48,36 @@ When a change arrives via a **pull request** on a non-default branch of the admi
 repo, Caldrith runs the same diff in **dry-run** and posts a GitHub **Check Run**
 with the summary. It mutates nothing — review the Check, then merge to apply.
 
+## Which repositories are managed
+
+By default Caldrith reconciles **every repository the App is installed on**, with two
+exceptions that are **always excluded**:
+
+- your **admin repo** (`ADMIN_REPO`, default `admin`) and **`.github`** — caldrith's
+  own meta repos are never managed by caldrith;
+- **archived** repositories — they reject settings changes (`403`/`422`), so they are
+  skipped (both when enumerating repos and, defensively, before any `PATCH`).
+
+To narrow the set further, add an optional `restrictedRepos` block. Patterns are
+minimatch-style globs (brace `{a,b}` and extglob `@(a|b)` supported):
+
+```yaml
+# A list excludes any repo matching one of the globs:
+restrictedRepos:
+  - "legacy-*"
+  - "*-sandbox"
+```
+
+```yaml
+# An object form gives an allowlist (include) and/or a denylist (exclude):
+restrictedRepos:
+  include: ["svc-*", "app-*"]   # when set, ONLY matching repos are managed
+  exclude: ["svc-legacy"]       # ...minus these
+```
+
+The built-in exclusions (admin repo, `.github`, archived) apply regardless of
+`restrictedRepos`.
+
 ## Deferred config tiers
 
 The schema reserves seams for the safe-settings surface that P1 does **not** yet
