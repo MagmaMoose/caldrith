@@ -2,6 +2,19 @@
 
 <!-- version list -->
 
+## v1.1.1 (2026-06-19)
+
+### Bug Fixes
+
+- Worker reads REDIS_URL (ARQ ignores the metaclass redis_settings)
+  ([`5f79aee`](https://github.com/MagmaMoose/caldrith/commit/5f79aeeb81de0efa2aba479fe66fe2016363e204))
+
+### Chores
+
+- Update caldrith image
+  ([`95dfbba`](https://github.com/MagmaMoose/caldrith/commit/95dfbbaa4a5c1cb397ca3e8b3a895fcfc721a748))
+
+
 ## v1.1.0 (2026-06-19)
 
 ### Chores
