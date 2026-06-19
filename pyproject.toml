@@ -1,6 +1,6 @@
 [project]
 name = "caldrith"
-version = "1.0.1"
+version = "1.0.2"
 description = "A public, multi-tenant GitHub App that enforces GitHub configuration-as-code (modeled on github/safe-settings)."
 readme = "README.md"
 requires-python = ">=3.12"

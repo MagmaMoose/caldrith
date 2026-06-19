@@ -2,6 +2,17 @@
 
 <!-- version list -->
 
+## v1.0.2 (2026-06-19)
+
+### Bug Fixes
+
+- Add docker-bake.hcl and repair the container build
+  ([`0d4707d`](https://github.com/MagmaMoose/caldrith/commit/0d4707d9750ee4c706cb3cccc4620d6de51e05ad))
+
+- Use 2nd-level webhook host caldrith.magmamoose.com
+  ([`e2207c3`](https://github.com/MagmaMoose/caldrith/commit/e2207c306e7ce2aa13cae0f1bf90ffb12fa39504))
+
+
 ## v1.0.1 (2026-06-19)
 
 ### Bug Fixes
