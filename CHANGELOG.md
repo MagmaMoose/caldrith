@@ -2,6 +2,20 @@
 
 <!-- version list -->
 
+## v1.4.2 (2026-06-21)
+
+### Bug Fixes
+
+- Make file-provisioning and ruleset tiers fleet-safe
+  ([#16](https://github.com/MagmaMoose/caldrith/pull/16),
+  [`98ae292`](https://github.com/MagmaMoose/caldrith/commit/98ae292f0e53898d8c18acfff578c33165557274))
+
+### Chores
+
+- Update caldrith image
+  ([`37ea17f`](https://github.com/MagmaMoose/caldrith/commit/37ea17f7c3475abc64bac3538bc0898ef7c6af4c))
+
+
 ## v1.4.1 (2026-06-21)
 
 ### Bug Fixes
