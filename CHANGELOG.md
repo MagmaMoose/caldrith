@@ -2,6 +2,27 @@
 
 <!-- version list -->
 
+## v1.4.0 (2026-06-21)
+
+### Chores
+
+- Update caldrith image
+  ([`52b2185`](https://github.com/MagmaMoose/caldrith/commit/52b2185d168aacb59e5339fe4120b9160df2d5dc))
+
+### Continuous Integration
+
+- Dogfood the Chargate security gate
+  ([`ac5fa2e`](https://github.com/MagmaMoose/caldrith/commit/ac5fa2e503ef1e37d6c8cf739227fed2d8fa0de0))
+
+- Use Diatreme for releases (evolution of calebsargeant/semantic-release)
+  ([`372fd24`](https://github.com/MagmaMoose/caldrith/commit/372fd2403bd439c897d33f3558683b13aa7913ea))
+
+### Features
+
+- File-provisioning tier — roll required workflows out org-wide via PR
+  ([`8869539`](https://github.com/MagmaMoose/caldrith/commit/8869539a7c16146565e16fdfe9d15cdcc7ededce))
+
+
 ## v1.3.0 (2026-06-19)
 
 ### Bug Fixes
