@@ -48,6 +48,14 @@ USER 1000
 ENV HOME=/home/app
 EXPOSE 8000
 
+# Liveness probe for non-orchestrated runs (docker run / compose) and image scanners.
+# Hits the dependency-free /healthz endpoint via the stdlib (the slim image has no
+# curl). Kubernetes ignores Docker HEALTHCHECK and uses the deployment's httpGet
+# probes instead; this targets the web CMD below (the ARQ worker overrides CMD and
+# has no HTTP listener, so it does not inherit a meaningful check there).
+HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
+    CMD ["python", "-c", "import sys,urllib.request; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/healthz', timeout=2).status == 200 else 1)"]
+
 # Web app (FastAPI ingest). The ARQ worker runs the same image with its command
 # overridden, e.g. in k8s:
 #   command: ["arq", "caldrith.worker.worker.WorkerSettings"]
