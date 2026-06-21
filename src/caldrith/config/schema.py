@@ -181,6 +181,51 @@ class BranchConfig(BaseModel):
     protection: BranchProtection | None = None
 
 
+class RulesetBypassActor(BaseModel):
+    """An actor allowed to bypass a ruleset (role, team, app, or org admin)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    actor_id: int | None = None
+    actor_type: str  # RepositoryRole | Team | Integration | OrganizationAdmin | DeployKey
+    bypass_mode: str = "always"  # always | pull_request
+
+
+class Ruleset(BaseModel):
+    """A repository ruleset Caldrith reconciles onto each managed repo.
+
+    ``conditions`` and ``rules`` are passed through to the GitHub rulesets API as-is
+    (their schemas are large and evolving); ``bypass_actors`` is typed. Reconciliation
+    is by ``name``: create if absent, update on drift. Idempotency uses a subset match
+    so GitHub's server-added defaults / echo fields don't trigger re-writes.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str
+    target: str = "branch"  # branch | tag | push
+    enforcement: str = "active"  # active | evaluate | disabled
+    conditions: dict[str, Any] | None = None
+    rules: list[dict[str, Any]] = Field(default_factory=list)
+    bypass_actors: list[RulesetBypassActor] | None = None
+
+
+class ManagedFile(BaseModel):
+    """A file Caldrith provisions into each managed repo via a pull request.
+
+    Used to roll required workflows (e.g. the Chargate gate, a Diatreme release) out
+    org-wide. ``create_only`` provisions the file only when absent and never overwrites
+    an existing one (right for per-repo-customised files like a release workflow);
+    the default keeps the file in sync with ``content`` (right for a uniform gate).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    path: str
+    content: str
+    create_only: bool = False
+
+
 class SafeSettingsConfig(BaseModel):
     """Top-level ``settings.yml`` document.
 
@@ -203,7 +248,8 @@ class SafeSettingsConfig(BaseModel):
 
     # --- DEFERRED seams: accepted-but-unused. Typed loosely on purpose. ---
     branches: list[BranchConfig] | None = None  # branch protection
-    rulesets: Any | None = None  # repo/org rulesets — DEFERRED
+    rulesets: list[Ruleset] | None = None  # repo rulesets (reconciled per managed repo)
+    files: list[ManagedFile] | None = None  # workflow/files provisioned into repos via PR
     labels: Any | None = None  # DEFERRED
     teams: Any | None = None  # DEFERRED
     collaborators: Any | None = None  # DEFERRED
