@@ -7,6 +7,11 @@ match**: every field the config declares must be present-and-equal in the live r
 extra server fields are ignored. Rulesets are **not pruned** — removing one from the
 config does not delete it (a deliberately safe default; deletes are manual).
 
+One exception to the subset rule: when the config declares ``bypass_actors``, the live
+set must match *exactly*. An extra, manually-added bypass actor on a required-check
+ruleset is a silent escape hatch around the gate, so it is treated as drift and
+reverted on the next reconcile (see ``_has_unexpected_bypass_actors``).
+
 Only **repo-level** rulesets are considered (org-inherited rulesets — ``source_type ==
 "Organization"`` — are left to the org and never edited here).
 """
@@ -76,6 +81,29 @@ def _to_body(ruleset: Ruleset) -> dict[str, Any]:
     return body
 
 
+def _has_unexpected_bypass_actors(desired: Ruleset, live: dict[str, Any]) -> bool:
+    """True if the live ruleset carries bypass actors the config does not declare.
+
+    The subset match alone would let a manually-added bypass actor persist on a
+    required-check ruleset — a silent escape hatch around the gate. When the config
+    declares ``bypass_actors`` (i.e. it manages them), the live set must be exactly
+    those actors; any extra is drift to revert. If the config omits ``bypass_actors``,
+    Caldrith does not manage them and leaves whatever is there untouched.
+    """
+    if desired.bypass_actors is None:
+        return False
+    declared = {(a.actor_id, a.actor_type) for a in desired.bypass_actors}
+    live_actors = {
+        (a.get("actor_id"), a.get("actor_type")) for a in (live.get("bypass_actors") or [])
+    }
+    return bool(live_actors - declared)
+
+
+def _has_drift(desired: Ruleset, body: dict[str, Any], live: dict[str, Any]) -> bool:
+    """True if the live ruleset differs from desired (subset OR unexpected bypass actors)."""
+    return not _subset_match(body, live) or _has_unexpected_bypass_actors(desired, live)
+
+
 class RulesetApplier:
     """Reconciles a single repo's rulesets against the declared set."""
 
@@ -116,7 +144,7 @@ class RulesetApplier:
                         data=body,  # type: ignore[arg-type]
                     )
                 result.changed_fields.append(f"create:{desired.name}")
-            elif not _subset_match(body, await self._full(target, current["id"])):
+            elif _has_drift(desired, body, await self._full(target, current["id"])):
                 if not self._dry_run:
                     await self._client.rest.repos.async_update_repo_ruleset(
                         owner=target.owner,

@@ -32,7 +32,12 @@ def builtin_excludes(admin_repo: str) -> frozenset[str]:
     return frozenset({admin_repo, ".github"})
 
 
-def _matches_any(name: str, patterns: Iterable[str] | None) -> bool:
+def matches_any(name: str, patterns: Iterable[str] | None) -> bool:
+    """True if ``name`` matches any of ``patterns`` (minimatch globs; empty -> False).
+
+    Shared by repo selection (``restrictedRepos``) and per-file exclusion
+    (``ManagedFile.skip_repos``) so both use identical glob semantics.
+    """
     pats = list(patterns or [])
     return bool(pats) and _fnmatch.fnmatch(name, pats, flags=_GLOB_FLAGS)
 
@@ -49,11 +54,11 @@ def is_managed(
     if restricted is None:
         return True
     if isinstance(restricted, RestrictedRepos):
-        if restricted.include and not _matches_any(name, restricted.include):
+        if restricted.include and not matches_any(name, restricted.include):
             return False
-        return not _matches_any(name, restricted.exclude)
+        return not matches_any(name, restricted.exclude)
     # List form: an exclude list of globs.
-    return not _matches_any(name, restricted)
+    return not matches_any(name, restricted)
 
 
 def select_targets(

@@ -142,3 +142,63 @@ async def test_dry_run_never_writes() -> None:
 
     assert not put.called and not create_pr.called
     assert result.files == [_PATH] and result.applied is False
+
+
+@respx.mock
+async def test_skip_repos_excludes_file_for_matching_repo() -> None:
+    # A per-file skip_repos glob excludes THIS file from the repo without dropping the
+    # repo from other management. No content is even read.
+    _mock_repo()
+    contents = respx.get(_CONTENTS, params={"ref": "main"}).mock(return_value=httpx.Response(404))
+    put = respx.put(_CONTENTS).mock(return_value=httpx.Response(201, json={}))
+    create_pr = respx.post(_PULLS).mock(return_value=httpx.Response(201, json={"html_url": "x"}))
+
+    managed = ManagedFile(path=_PATH, content=CONTENT, skip_repos=["wid*"])
+    async with GitHub("token") as client:
+        result = await FileProvisioner(client).apply(TargetRepo("acme", "widget"), [managed])
+
+    assert not contents.called  # skipped before any lookup
+    assert not put.called and not create_pr.called
+    assert result.changed is False
+
+
+@respx.mock
+async def test_create_only_skips_when_sibling_extension_exists() -> None:
+    # Managed release.yaml is create_only; the repo already has release.yml (same
+    # workflow, other extension) -> do NOT add a duplicate that double-fires.
+    rel_yaml = f"{_REPO}/contents/.github/workflows/release.yaml"
+    rel_yml = f"{_REPO}/contents/.github/workflows/release.yml"
+    _mock_repo()
+    respx.get(rel_yaml, params={"ref": "main"}).mock(return_value=httpx.Response(404))
+    respx.get(rel_yml, params={"ref": "main"}).mock(return_value=_file("name: Release\n"))
+    put = respx.put(rel_yaml).mock(return_value=httpx.Response(201, json={}))
+
+    managed = ManagedFile(
+        path=".github/workflows/release.yaml",
+        content="name: Release (caldrith)\n",
+        create_only=True,
+    )
+    async with GitHub("token") as client:
+        result = await FileProvisioner(client).apply(TargetRepo("acme", "widget"), [managed])
+
+    assert not put.called  # sibling release.yml present -> no duplicate
+    assert result.changed is False
+
+
+@respx.mock
+async def test_empty_repo_skipped_gracefully() -> None:
+    # An empty repo (no commit on the default branch) has nothing to branch from:
+    # skip without raising, so one empty repo can't break the org reconcile.
+    _mock_repo()
+    respx.get(_CONTENTS, params={"ref": "main"}).mock(return_value=httpx.Response(404))
+    respx.get(_BRANCH_REF).mock(return_value=httpx.Response(404))
+    respx.get(_MAIN_REF).mock(return_value=httpx.Response(404))  # no base commit
+    create_ref = respx.post(_REFS).mock(return_value=httpx.Response(201, json={}))
+    put = respx.put(_CONTENTS).mock(return_value=httpx.Response(201, json={}))
+    create_pr = respx.post(_PULLS).mock(return_value=httpx.Response(201, json={"html_url": "x"}))
+
+    async with GitHub("token") as client:
+        result = await FileProvisioner(client).apply(TargetRepo("acme", "widget"), [_managed()])
+
+    assert not create_ref.called and not put.called and not create_pr.called
+    assert result.changed is False and result.applied is False
