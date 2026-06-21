@@ -11,7 +11,11 @@ from githubkit import GitHub
 
 from caldrith.config.schema import Ruleset, RulesetBypassActor
 from caldrith.reconcile.planner import TargetRepo
-from caldrith.reconcile.ruleset import RulesetApplier, _subset_match
+from caldrith.reconcile.ruleset import (
+    RulesetApplier,
+    _has_unexpected_bypass_actors,
+    _subset_match,
+)
 
 _RULESETS = "https://api.github.com/repos/acme/widget/rulesets"
 
@@ -170,3 +174,45 @@ async def test_dry_run_never_writes() -> None:
 
     assert not create.called
     assert result.changed is True and result.applied is False
+
+
+def test_unexpected_bypass_actor_detection() -> None:
+    desired = _desired()  # declares the diatreme Integration actor
+    declared_only = {"bypass_actors": [{"actor_id": 2134967, "actor_type": "Integration"}]}
+    assert _has_unexpected_bypass_actors(desired, declared_only) is False
+    with_extra = {
+        "bypass_actors": [
+            {"actor_id": 2134967, "actor_type": "Integration"},
+            {"actor_id": 9, "actor_type": "Team"},  # manually added escape hatch
+        ]
+    }
+    assert _has_unexpected_bypass_actors(desired, with_extra) is True
+    # A config that does not declare bypass_actors does not manage them -> never flags.
+    unmanaged = Ruleset(name="x", rules=[])
+    assert _has_unexpected_bypass_actors(unmanaged, with_extra) is False
+
+
+@respx.mock
+async def test_extra_bypass_actor_reverted_as_drift() -> None:
+    # Live ruleset subset-matches desired but carries an EXTRA bypass actor (a silent
+    # escape hatch around the required check). Must be detected as drift and reverted.
+    sneaky = _live_full(ruleset_id=7)
+    sneaky["bypass_actors"] = [
+        {"actor_id": 2134967, "actor_type": "Integration", "bypass_mode": "always"},
+        {"actor_id": 5, "actor_type": "OrganizationAdmin", "bypass_mode": "always"},
+    ]
+    respx.get(_RULESETS).mock(
+        return_value=httpx.Response(
+            200, json=[{"id": 7, "name": "Chargate required", "source_type": "Repository"}]
+        )
+    )
+    respx.get(f"{_RULESETS}/7").mock(return_value=httpx.Response(200, json=sneaky))
+    put = respx.put(f"{_RULESETS}/7").mock(
+        return_value=httpx.Response(200, json=_live_full(ruleset_id=7))
+    )
+
+    async with GitHub("token") as client:
+        result = await RulesetApplier(client).apply(TargetRepo("acme", "widget"), [_desired()])
+
+    assert put.called  # extra bypass actor reverted
+    assert result.changed_fields == ["update:Chargate required"]

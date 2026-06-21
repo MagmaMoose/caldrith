@@ -217,6 +217,12 @@ class ManagedFile(BaseModel):
     org-wide. ``create_only`` provisions the file only when absent and never overwrites
     an existing one (right for per-repo-customised files like a release workflow);
     the default keeps the file in sync with ``content`` (right for a uniform gate).
+
+    ``skip_repos`` is a list of repo-name globs to exclude from THIS file only — a
+    per-file escape hatch that, unlike ``restrictedRepos``, leaves the repo under all
+    other Caldrith management. Use it for a repo whose copy of the file is intentionally
+    bespoke (e.g. chargate's self-referential security workflow that calls its own
+    local gate rather than the SHA-pinned org one).
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -224,6 +230,7 @@ class ManagedFile(BaseModel):
     path: str
     content: str
     create_only: bool = False
+    skip_repos: list[str] | None = None
 
 
 class SafeSettingsConfig(BaseModel):

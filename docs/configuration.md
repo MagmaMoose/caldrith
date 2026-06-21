@@ -174,6 +174,12 @@ declared field actually differs (a **subset match**). Rulesets are **not pruned*
 removing one from the config does not delete it (deletes are manual). Only repo-level
 rulesets are touched; org-inherited ones are left alone.
 
+One exception to the subset rule: when you declare `bypass_actors`, the live set must
+match **exactly**. A manually-added extra bypass actor on a required-check ruleset is a
+silent escape hatch around the gate, so Caldrith treats it as drift and reverts it on
+the next reconcile. (Omit `bypass_actors` entirely to leave a repo's bypass list
+unmanaged.)
+
 !!! warning "Required-check rulesets need the check to actually run"
     A `required_status_checks` rule blocks PRs until that check reports. The check only
     runs if the repo has the workflow that produces it (e.g. the Chargate gate). Pair
@@ -199,6 +205,7 @@ files:
           uses: magmamoose/chargate/.github/workflows/gate.yml@<sha>
   - path: .github/workflows/release.yaml
     create_only: true        # don't overwrite a repo's own release workflow
+    skip_repos: ["chargate"] # ...and leave this repo's copy alone entirely
     content: |
       # ... a Diatreme release workflow ...
 ```
@@ -206,11 +213,18 @@ files:
 - **Default** (`create_only: false`): keeps the file in sync with `content` (right for a
   uniform file like the gate).
 - **`create_only: true`**: provisions only when the file is absent, never overwriting an
-  existing one (right for per-repo-customised files like a release workflow).
+  existing one (right for per-repo-customised files like a release workflow). A `.yml`/
+  `.yaml` **sibling counts as present** — a managed `release.yaml` is not added next to a
+  repo's existing `release.yml`, so you never get two workflows firing on the same event.
+- **`skip_repos`**: a list of repo-name globs to exclude from **this file only**. Unlike
+  `restrictedRepos` (which drops a repo from *all* management), this is a per-file escape
+  hatch — use it for a repo whose copy is intentionally bespoke (e.g. chargate's
+  self-referential security workflow that calls its own local gate).
 
 Idempotent and non-destructive: files already matching are skipped, the PR branch is
 reused, and an open PR is never duplicated — so re-running while a PR is pending does
-nothing.
+nothing. An **empty repository** (no commit on its default branch) is skipped gracefully
+— there is nothing to branch a PR from yet.
 
 !!! tip "Sequencing with a required-check ruleset"
     To enforce the Chargate gate org-wide, provision `security.yml` (here) **and** add a
