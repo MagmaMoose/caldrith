@@ -2,6 +2,28 @@
 
 <!-- version list -->
 
+## v1.4.1 (2026-06-21)
+
+### Bug Fixes
+
+- Add HEALTHCHECK to satisfy the security gate
+  ([#15](https://github.com/MagmaMoose/caldrith/pull/15),
+  [`1bf81c3`](https://github.com/MagmaMoose/caldrith/commit/1bf81c3e9d08a2d7fd76c79795a3f2843985db29))
+
+- Pin runtime Python to the builder (production CrashLoopBackOff)
+  ([#15](https://github.com/MagmaMoose/caldrith/pull/15),
+  [`1bf81c3`](https://github.com/MagmaMoose/caldrith/commit/1bf81c3e9d08a2d7fd76c79795a3f2843985db29))
+
+- Pin runtime Python to the builder via ARG (unbreak the container)
+  ([#15](https://github.com/MagmaMoose/caldrith/pull/15),
+  [`1bf81c3`](https://github.com/MagmaMoose/caldrith/commit/1bf81c3e9d08a2d7fd76c79795a3f2843985db29))
+
+### Chores
+
+- Update caldrith image
+  ([`80b2118`](https://github.com/MagmaMoose/caldrith/commit/80b21187eb02109837a06206919daaa86c6ab2d4))
+
+
 ## v1.4.0 (2026-06-21)
 
 ### Chores
