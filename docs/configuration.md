@@ -143,12 +143,88 @@ actually differs. `protection: null` removes protection.
     on push restrictions today, hold off declaring `branches:` for that
     branch until the deferred `restrictions` block lands.
 
+## Rulesets
+
+A top-level `rulesets:` list declares **repository rulesets** Caldrith reconciles onto
+every managed repo (matched by `name`: created if absent, updated on drift). `rules`
+and `conditions` are passed to the GitHub rulesets API as-is; `bypass_actors` lets
+trusted apps/roles skip the rules.
+
+```yaml
+rulesets:
+  - name: Chargate required
+    target: branch
+    enforcement: active
+    conditions:
+      ref_name: { include: ["~DEFAULT_BRANCH"], exclude: [] }
+    rules:
+      - type: required_status_checks
+        parameters:
+          required_status_checks:
+            - context: "chargate / chargate"
+          strict_required_status_checks_policy: false
+    bypass_actors:
+      - actor_id: 2134967      # e.g. the release/Flux app, so it can push without the gate
+        actor_type: Integration
+        bypass_mode: always
+```
+
+Idempotent: GitHub echoes server-added defaults, so Caldrith only `PUT`s when a
+declared field actually differs (a **subset match**). Rulesets are **not pruned** —
+removing one from the config does not delete it (deletes are manual). Only repo-level
+rulesets are touched; org-inherited ones are left alone.
+
+!!! warning "Required-check rulesets need the check to actually run"
+    A `required_status_checks` rule blocks PRs until that check reports. The check only
+    runs if the repo has the workflow that produces it (e.g. the Chargate gate). Pair
+    this with provisioning that workflow into the repo, or the ruleset will block every
+    PR on a check that never runs.
+
+## Provisioned files (required workflows)
+
+A top-level `files:` list makes Caldrith **provision files into every managed repo via a
+pull request** — the way required workflows (the Chargate gate, a Diatreme release) get
+rolled out org-wide. Caldrith never pushes to the default branch directly: it opens (and
+reuses) one PR per repo from a stable `caldrith/managed-files` branch.
+
+```yaml
+files:
+  - path: .github/workflows/security.yml
+    content: |
+      name: Security
+      on: { pull_request: {}, push: { branches: [main] } }
+      permissions: { contents: read, pull-requests: read, security-events: write }
+      jobs:
+        chargate:
+          uses: magmamoose/chargate/.github/workflows/gate.yml@<sha>
+  - path: .github/workflows/release.yaml
+    create_only: true        # don't overwrite a repo's own release workflow
+    content: |
+      # ... a Diatreme release workflow ...
+```
+
+- **Default** (`create_only: false`): keeps the file in sync with `content` (right for a
+  uniform file like the gate).
+- **`create_only: true`**: provisions only when the file is absent, never overwriting an
+  existing one (right for per-repo-customised files like a release workflow).
+
+Idempotent and non-destructive: files already matching are skipped, the PR branch is
+reused, and an open PR is never duplicated — so re-running while a PR is pending does
+nothing.
+
+!!! tip "Sequencing with a required-check ruleset"
+    To enforce the Chargate gate org-wide, provision `security.yml` (here) **and** add a
+    `required_status_checks` ruleset. But the check only reports once each repo's
+    provisioning PR is **merged** — so keep the ruleset's `enforcement: evaluate` (or
+    omit it) until the gate PRs land, then flip to `active`. Otherwise the ruleset blocks
+    every PR on a check that hasn't started running yet.
+
 ## Deferred config tiers
 
 The schema reserves seams for the safe-settings surface not yet implemented:
-rulesets, labels, teams, collaborators, environments, custom properties, and
-suborg/repo overlay tiers (present only as a stub). These keys may appear in your
-file and validate, but are not applied yet.
+labels, teams, collaborators, environments, custom properties, and suborg/repo overlay
+tiers (present only as a stub). These keys may appear in your file and validate, but are
+not applied yet.
 
 ## The generated JSON Schema
 

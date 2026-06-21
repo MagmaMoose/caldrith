@@ -160,6 +160,52 @@ def test_empty_required_status_checks_rejected() -> None:
         )
 
 
+def test_rulesets_parse() -> None:
+    cfg = SafeSettingsConfig.model_validate(
+        {
+            "rulesets": [
+                {
+                    "name": "Chargate required",
+                    "enforcement": "active",
+                    "conditions": {"ref_name": {"include": ["~DEFAULT_BRANCH"]}},
+                    "rules": [
+                        {
+                            "type": "required_status_checks",
+                            "parameters": {
+                                "required_status_checks": [{"context": "chargate / chargate"}]
+                            },
+                        }
+                    ],
+                    "bypass_actors": [
+                        {"actor_id": 2134967, "actor_type": "Integration", "bypass_mode": "always"}
+                    ],
+                }
+            ]
+        }
+    )
+    assert cfg.rulesets is not None
+    assert cfg.rulesets[0].name == "Chargate required"
+    assert cfg.rulesets[0].target == "branch"  # default
+    assert cfg.rulesets[0].rules[0]["type"] == "required_status_checks"
+    assert cfg.rulesets[0].bypass_actors is not None
+    assert cfg.rulesets[0].bypass_actors[0].actor_id == 2134967
+
+
+def test_files_parse() -> None:
+    cfg = SafeSettingsConfig.model_validate(
+        {
+            "files": [
+                {"path": ".github/workflows/security.yml", "content": "name: Security\n"},
+                {"path": ".github/workflows/release.yaml", "content": "x", "create_only": True},
+            ]
+        }
+    )
+    assert cfg.files is not None
+    assert cfg.files[0].path == ".github/workflows/security.yml"
+    assert cfg.files[0].create_only is False  # default
+    assert cfg.files[1].create_only is True
+
+
 def test_json_schema_available() -> None:
     schema = config_json_schema()
     assert "properties" in schema
