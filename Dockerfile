@@ -1,10 +1,16 @@
 # syntax=docker/dockerfile:1
 
+# Builder and runtime MUST share the same Python minor: the venv installs into
+# lib/python<minor>, so a mismatch makes every dependency import fail at runtime
+# (ModuleNotFoundError: No module named 'uvicorn'). One ARG = one source of truth, and
+# templated FROM tags keep Dependabot from bumping the two apart.
+ARG PYTHON_VERSION=3.12
+
 # ---- Builder ---------------------------------------------------------------
 # Resolve and install the locked runtime dependencies into a self-contained
 # virtualenv at /app/.venv using uv. A BuildKit cache mount keeps uv's wheel
 # cache warm across builds without baking it into a layer.
-FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim AS builder
+FROM ghcr.io/astral-sh/uv:python${PYTHON_VERSION}-bookworm-slim AS builder
 
 ENV UV_COMPILE_BYTECODE=1 \
     UV_LINK_MODE=copy \
@@ -25,7 +31,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --no-dev
 
 # ---- Runtime ---------------------------------------------------------------
-FROM python:3.14-slim AS runtime
+FROM python:${PYTHON_VERSION}-slim AS runtime
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
