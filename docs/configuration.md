@@ -18,6 +18,11 @@ reconciled by its own module under `caldrith.reconcile`. Repository-scoped tiers
 no-op'ing, and every field is optional — **only fields you explicitly set are
 reconciled** (an omitted field leaves the live value alone).
 
+Each tier below documents its keys as a `Key | Default | Purpose` reference table. A
+**Default** of `—` means the key is optional and **unset** — caldrith leaves the live
+value alone; `required` marks a key with no default; any other value is the literal
+default applied when you omit the key.
+
 ## Reconcile semantics
 
 Caldrith reads the live state, computes a **deep diff** against your desired
@@ -94,6 +99,13 @@ restrictedRepos:
 The built-in exclusions (admin repo, `.github`, archived) apply regardless of
 `restrictedRepos`.
 
+**Fields** — `restrictedRepos` object form (or give a plain list of exclude globs instead):
+
+| Key | Default | Purpose |
+| --- | --- | --- |
+| `include` | — | Allowlist of repo-name globs; when set, only matching repos are managed. |
+| `exclude` | — | Repo-name globs to skip. |
+
 ## The `repository:` block
 
 The `repository:` block maps to the GitHub repo-update API (`PATCH /repos/{owner}/{repo}`).
@@ -139,6 +151,38 @@ Idempotent: the diff drives the `PATCH`, so a converged repo issues no mutation.
     are **not** sent through `repos.update` — they have dedicated endpoints and
     are documented in their own sections below.
 
+**Fields** — every key maps to a `repos.update` parameter; set only what you want managed.
+
+| Key | Default | Purpose |
+| --- | --- | --- |
+| `name` | — | Repository name; renames the repo. |
+| `description` | — | Short repo description. |
+| `homepage` | — | Project homepage URL. |
+| `private` | — | Whether the repo is private (`true`) or public (`false`). |
+| `visibility` | — | Repo visibility: `public` \| `private` \| `internal`. |
+| `has_issues` | — | Enable the Issues feature. |
+| `has_projects` | — | Enable the Projects feature. |
+| `has_wiki` | — | Enable the Wiki feature. |
+| `has_downloads` | — | Enable the Downloads feature. |
+| `has_discussions` | — | Enable the Discussions feature. |
+| `is_template` | — | Mark the repo as a template repository. |
+| `default_branch` | — | Name of the default branch. |
+| `allow_squash_merge` | — | Allow squash-merging pull requests. |
+| `allow_merge_commit` | — | Allow merging pull requests with a merge commit. |
+| `allow_rebase_merge` | — | Allow rebase-merging pull requests. |
+| `allow_auto_merge` | — | Allow auto-merge on pull requests. |
+| `delete_branch_on_merge` | — | Auto-delete head branches after merge. |
+| `allow_update_branch` | — | Allow updating PR branches behind the base. |
+| `use_squash_pr_title_as_default` | — | Use the PR title as the default squash commit title. |
+| `squash_merge_commit_title` | — | Squash commit title source: `PR_TITLE` \| `COMMIT_OR_PR_TITLE`. |
+| `squash_merge_commit_message` | — | Squash commit message source: `PR_BODY` \| `COMMIT_MESSAGES` \| `BLANK`. |
+| `merge_commit_title` | — | Merge commit title source: `PR_TITLE` \| `MERGE_MESSAGE`. |
+| `merge_commit_message` | — | Merge commit message source: `PR_BODY` \| `PR_TITLE` \| `BLANK`. |
+| `allow_forking` | — | Allow forking of the repository. |
+| `web_commit_signoff_required` | — | Require sign-off on web-based commits. |
+| `archived` | — | Archive (`true`) or unarchive the repo. |
+| `security_and_analysis` | — | Passthrough code-security/analysis object; sent verbatim and deep-diffed (nested shape not enumerated). |
+
 ## Topics
 
 `repository.topics` is a **full-replace**: the live topic set is replaced with
@@ -149,6 +193,12 @@ order-insensitive, so re-applying a converged repo issues no write.
 repository:
   topics: [payments, golang, internal]
 ```
+
+**Fields**
+
+| Key | Default | Purpose |
+| --- | --- | --- |
+| `repository.topics` | — | Full topic set; full-replace (order-insensitive). Unset leaves topics alone; `[]` clears all. |
 
 ## Repository security
 
@@ -168,6 +218,14 @@ Each is optional — omit a key to leave that toggle untouched. (Vulnerability a
 are reconciled first, since automated security fixes depend on them.) Secret
 scanning and push protection live under `repository.security_and_analysis` (passed
 through to `repos.update`).
+
+**Fields** — the three keys are camelCase aliases (the YAML key, not the python name).
+
+| Key | Default | Purpose |
+| --- | --- | --- |
+| `enableVulnerabilityAlerts` | — | Toggle Dependabot vulnerability alerts. Reconciled first (automated fixes depend on it). |
+| `enableAutomatedSecurityFixes` | — | Toggle Dependabot automated security updates. |
+| `enablePrivateVulnerabilityReporting` | — | Toggle private vulnerability reporting. |
 
 ## Branch protection
 
@@ -223,6 +281,54 @@ actually differs. `protection: null` removes protection.
     reconcile. **Omit** `restrictions` to leave a branch's push restriction
     unmanaged.
 
+**Fields** — each `branches[]` entry:
+
+| Key | Default | Purpose |
+| --- | --- | --- |
+| `name` | required | Branch to protect; the literal `default` resolves to the repo's default branch. |
+| `protection` | — | Protection block (below); `null`/omitted removes protection from the branch. |
+
+**`protection`** (full-replace — omitted sub-fields fall back to GitHub's "off" defaults)
+
+| Key | Default | Purpose |
+| --- | --- | --- |
+| `required_status_checks` | — | Required-CI-checks block (below); omitted = no required checks. |
+| `enforce_admins` | — | Apply protection to admins too. |
+| `required_pull_request_reviews` | — | PR-review-requirements block (below); omitted = no required reviews. |
+| `restrictions` | — | Push-restriction block (below); omitted = no push restriction. |
+| `required_linear_history` | — | Require a linear commit history (no merge commits). |
+| `allow_force_pushes` | — | Allow force pushes to the branch. |
+| `allow_deletions` | — | Allow the protected branch to be deleted. |
+| `required_conversation_resolution` | — | Require all PR conversations resolved before merge. |
+| `block_creations` | — | Block creation of matching branches. |
+| `lock_branch` | — | Lock the branch read-only (no pushes). |
+| `allow_fork_syncing` | — | Allow syncing a fork's branch even when locked. |
+| `required_signatures` | — | Require signed commits (applied via the commit-signature endpoint, not the protection PUT). |
+
+**`protection.required_status_checks`** (set at least one field or omit the block)
+
+| Key | Default | Purpose |
+| --- | --- | --- |
+| `strict` | — | Require branches to be up to date before merging. |
+| `contexts` | — | List of required status-check context names. |
+
+**`protection.required_pull_request_reviews`** (set at least one field or omit the block)
+
+| Key | Default | Purpose |
+| --- | --- | --- |
+| `dismiss_stale_reviews` | — | Dismiss stale approvals when new commits are pushed. |
+| `require_code_owner_reviews` | — | Require review from CODEOWNERS. |
+| `required_approving_review_count` | — | Integer count of approving reviews required. |
+| `require_last_push_approval` | — | Require approval of the most recent reviewable push. |
+
+**`protection.restrictions`** (an explicit, even empty, block locks pushes to exactly the listed actors)
+
+| Key | Default | Purpose |
+| --- | --- | --- |
+| `users` | `[]` | User logins allowed to push. |
+| `teams` | `[]` | Team slugs allowed to push. |
+| `apps` | `[]` | GitHub App slugs allowed to push. |
+
 ## Rulesets
 
 A `rulesets:` list declares **repository rulesets** Caldrith reconciles onto every
@@ -267,6 +373,25 @@ unmanaged.)
     this with provisioning that workflow into the repo, or the ruleset will block every
     PR on a check that never runs.
 
+**Fields** — each `rulesets[]` entry (reconciled by `name`; never pruned):
+
+| Key | Default | Purpose |
+| --- | --- | --- |
+| `name` | required | Ruleset name; the create/update match key. |
+| `target` | `branch` | What the ruleset targets: `branch` \| `tag` \| `push`. |
+| `enforcement` | `active` | Enforcement level: `active` \| `evaluate` \| `disabled`. |
+| `conditions` | — | Ref/name conditions, passed to the rulesets API as-is. |
+| `rules` | `[]` | List of rule objects, passed to the rulesets API as-is. |
+| `bypass_actors` | — | Actors allowed to bypass (below); when set, the live set must match exactly. |
+
+**`rulesets[].bypass_actors[]`**
+
+| Key | Default | Purpose |
+| --- | --- | --- |
+| `actor_id` | — | Numeric id of the actor (role/team/app id). |
+| `actor_type` | required | `RepositoryRole` \| `Team` \| `Integration` \| `OrganizationAdmin` \| `DeployKey`. |
+| `bypass_mode` | `always` | When the bypass applies: `always` \| `pull_request`. |
+
 ## Labels
 
 A `labels:` list is the **complete** desired label set (full-replace): missing
@@ -285,6 +410,15 @@ labels:
     color: a2eeef
 ```
 
+**Fields** — each `labels[]` entry (full-replace; undeclared labels are pruned):
+
+| Key | Default | Purpose |
+| --- | --- | --- |
+| `name` | required | Label name; reconciliation key and the rename target. |
+| `color` | — | 6-hex colour, with or without leading `#` (normalised before compare). |
+| `description` | — | Label description. |
+| `oldname` | — | Existing label to rename to `name` (preserving issue links) instead of delete+create. |
+
 ## Milestones
 
 A `milestones:` list is reconciled by `title` (create/update). A declared
@@ -299,6 +433,15 @@ milestones:
     description: First stable release
     due_on: "2026-12-31T00:00:00Z"   # ISO-8601
 ```
+
+**Fields** — each `milestones[]` entry (reconciled by `title`; never pruned):
+
+| Key | Default | Purpose |
+| --- | --- | --- |
+| `title` | required | Milestone title; the create/update match key. |
+| `state` | — | Milestone state: `open` \| `closed`. |
+| `description` | — | Free-text milestone description. |
+| `due_on` | — | Due date as an ISO-8601 timestamp. |
 
 ## Collaborators
 
@@ -316,6 +459,13 @@ collaborators:
     permission: push
 ```
 
+**Fields** — each `collaborators[]` entry (full-replace over *direct* collaborators):
+
+| Key | Default | Purpose |
+| --- | --- | --- |
+| `username` | required | GitHub login to grant direct access (matched case-insensitively). |
+| `permission` | `push` | Access level: `pull` \| `triage` \| `push` \| `maintain` \| `admin`. |
+
 ## Teams
 
 A `teams:` list grants team access to a repo (**Organization installs only**;
@@ -330,6 +480,13 @@ teams:
   - name: developers
     permission: push
 ```
+
+**Fields** — each `teams[]` entry (Organization installs only; full-replace):
+
+| Key | Default | Purpose |
+| --- | --- | --- |
+| `name` | required | Team slug to grant repo access. |
+| `permission` | `push` | Access level: `pull` \| `triage` \| `push` \| `maintain` \| `admin`. |
 
 ## Autolinks
 
@@ -346,6 +503,14 @@ autolinks:
     url_template: "https://jira.example.com/browse/JIRA-<num>"
     is_alphanumeric: false
 ```
+
+**Fields** — each `autolinks[]` entry (full-replace; changed entries are delete+recreate):
+
+| Key | Default | Purpose |
+| --- | --- | --- |
+| `key_prefix` | required | Reference prefix that triggers the autolink (e.g. `JIRA-`). |
+| `url_template` | required | Target URL with a `<num>` placeholder for the matched reference. |
+| `is_alphanumeric` | — | Alphanumeric (`true`) or numeric-only (`false`) suffix; unset compares as GitHub's default `true`. |
 
 ## Custom properties
 
@@ -367,6 +532,14 @@ custom_properties:
     Setting a value for an undefined property fails at the API. Declare the
     property schema under `organization.custom_property_definitions` first.
 
+**Fields** — `custom_properties` is a mapping of property name → value (caldrith manages only the names you declare):
+
+| Key | Default | Purpose |
+| --- | --- | --- |
+| `custom_properties.<name>: <string>` | — | Set a single-value property. The org must define the property first. |
+| `custom_properties.<name>: [<string>, …]` | — | Set a multi-select property (order-insensitive diff). |
+| `custom_properties.<name>: null` | — | Explicitly clear the property's value on the repo. |
+
 ## Interaction limits
 
 An `interaction_limits` block temporarily restricts who can comment / open issues /
@@ -380,6 +553,13 @@ interaction_limits:
   limit: contributors_only   # existing_users | contributors_only | collaborators_only
   expiry: one_week           # one_day | three_days | one_week | one_month | six_months
 ```
+
+**Fields**
+
+| Key | Default | Purpose |
+| --- | --- | --- |
+| `limit` | — | Who may interact while active: `existing_users` \| `contributors_only` \| `collaborators_only`. `null` removes any active limit. |
+| `expiry` | — | How long the limit stays active: `one_day` \| `three_days` \| `one_week` \| `one_month` \| `six_months`. |
 
 ## Actions
 
@@ -404,6 +584,15 @@ actions:
   can_approve_pull_request_reviews: false
 ```
 
+**Fields**
+
+| Key | Default | Purpose |
+| --- | --- | --- |
+| `enabled` | — | Whether GitHub Actions is enabled for the repo. |
+| `allowed_actions` | — | Which actions may run: `all` \| `local_only` \| `selected`. |
+| `default_workflow_permissions` | — | Default `GITHUB_TOKEN` scope: `read` \| `write`. |
+| `can_approve_pull_request_reviews` | — | Whether Actions can approve pull request reviews. |
+
 ## Variables
 
 A `variables:` list is the **complete** set of Actions variables (full-replace).
@@ -418,6 +607,13 @@ variables:
   - name: REGION
     value: eu-west-1
 ```
+
+**Fields** — each `variables[]` entry (full-replace; undeclared variables are deleted):
+
+| Key | Default | Purpose |
+| --- | --- | --- |
+| `name` | required | Actions variable name; reconciled by name. |
+| `value` | required | Variable value; readable, so diffed exactly and updated on drift. |
 
 ## Secrets
 
@@ -446,6 +642,14 @@ secrets:
     it on GitHub (or let `prune` remove it) and let the next reconcile recreate it
     from the current `CALDRITH_SECRET_<NAME>` env value.
 
+**Fields**
+
+| Key | Default | Purpose |
+| --- | --- | --- |
+| `actions` | `[]` | Names of Actions secrets to ensure exist (created from `CALDRITH_SECRET_<NAME>`; never rotated). |
+| `dependabot` | `[]` | Names of Dependabot secrets to ensure exist; same create-if-missing semantics. |
+| `prune` | `false` | When `true`, delete live secrets not declared — only in the stores you populate. |
+
 ## Environments
 
 An `environments:` list is reconciled by `name` (create/update). A declared
@@ -467,6 +671,30 @@ environments:
       custom_branch_policies: false
 ```
 
+**Fields** — each `environments[]` entry (reconciled by `name`; never pruned):
+
+| Key | Default | Purpose |
+| --- | --- | --- |
+| `name` | required | Environment name; matched against live environments. |
+| `wait_timer` | — | Minutes to delay before deployments may proceed. |
+| `prevent_self_review` | — | Block the deployer from approving their own run. |
+| `reviewers` | — | List of required reviewers (below). |
+| `deployment_branch_policy` | — | Passthrough dict controlling which branches/tags can deploy (below). |
+
+**`environments[].reviewers[]`**
+
+| Key | Default | Purpose |
+| --- | --- | --- |
+| `type` | required | Reviewer kind: `User` \| `Team`. |
+| `id` | required | Numeric GitHub user or team id. |
+
+**`environments[].deployment_branch_policy`** (passthrough dict — the API's standard keys)
+
+| Key | Default | Purpose |
+| --- | --- | --- |
+| `protected_branches` | — | `true` restricts deployments to branches matching the repo's protection rules. |
+| `custom_branch_policies` | — | `true` enables custom name-pattern policies (mutually exclusive with `protected_branches`). |
+
 ## Pages
 
 A `pages` block reconciles GitHub Pages. If Pages is not enabled and you declare a
@@ -482,6 +710,16 @@ pages:
   cname: docs.example.com
   https_enforced: true
 ```
+
+**Fields** — only declared sub-fields are reconciled; Pages is enabled if unset and a source/build type is declared, but never disabled.
+
+| Key | Default | Purpose |
+| --- | --- | --- |
+| `build_type` | — | Pages build type: `legacy` \| `workflow`. |
+| `source_branch` | — | Branch serving the site for legacy builds. |
+| `source_path` | — | Source directory for legacy builds: `/` \| `/docs`. |
+| `cname` | — | Custom domain for the Pages site. |
+| `https_enforced` | — | Whether HTTPS is enforced on the Pages site. |
 
 ## Provisioned files (required workflows)
 
@@ -544,6 +782,15 @@ deleted** rather than left dangling.
     omit it) until the gate PRs land, then flip to `active`. Otherwise the ruleset blocks
     every PR on a check that hasn't started running yet.
 
+**Fields** — each `files[]` entry:
+
+| Key | Default | Purpose |
+| --- | --- | --- |
+| `path` | required | Repo-relative path of the file to provision (e.g. `.github/workflows/gate.yml`). |
+| `content` | required | Full file body caldrith writes; a matching file is skipped, a drifted one updated (unless `create_only`). |
+| `create_only` | `false` | When `true`, provision only when absent and never overwrite; a `.yml`/`.yaml` sibling counts as present. |
+| `skip_repos` | — | Repo-name globs to exclude THIS file from (a matched repo is skipped and any prior managed copy pruned). |
+
 ## The `organization:` block
 
 The `organization:` block is applied **once per Organization installation** (it is a
@@ -603,6 +850,70 @@ The same pruning rules apply per nested tier: org `rulesets` and
 `custom_property_definitions` are **not pruned**; scalar fields are diffed and only
 the drifted ones are written.
 
+**Fields** — scalar keys map to `orgs.update`; the nested blocks use their own endpoints.
+
+| Key | Default | Purpose |
+| --- | --- | --- |
+| `billing_email` | — | Org billing email (profile). |
+| `company` | — | Org company name (profile). |
+| `email` | — | Org public email (profile). |
+| `twitter_username` | — | Org Twitter handle (profile). |
+| `location` | — | Org location (profile). |
+| `name` | — | Org display name (profile). |
+| `description` | — | Org description (profile). |
+| `blog` | — | Org blog/website URL (profile). |
+| `has_organization_projects` | — | Allow org-level projects. |
+| `has_repository_projects` | — | Allow repo-level projects across the org. |
+| `default_repository_permission` | — | Base permission members get on all repos: `read` \| `write` \| `admin` \| `none`. |
+| `members_can_create_repositories` | — | Members may create repos. |
+| `members_can_create_internal_repositories` | — | Members may create internal repos. |
+| `members_can_create_private_repositories` | — | Members may create private repos. |
+| `members_can_create_public_repositories` | — | Members may create public repos. |
+| `members_can_create_pages` | — | Members may publish GitHub Pages sites. |
+| `members_can_create_public_pages` | — | Members may publish public Pages sites. |
+| `members_can_create_private_pages` | — | Members may publish private Pages sites. |
+| `members_can_fork_private_repositories` | — | Members may fork private repos. |
+| `web_commit_signoff_required` | — | Require sign-off on web-based commits org-wide. |
+| `advanced_security_enabled_for_new_repositories` | — | Enable Advanced Security on new repos. |
+| `dependabot_alerts_enabled_for_new_repositories` | — | Enable Dependabot alerts on new repos. |
+| `dependabot_security_updates_enabled_for_new_repositories` | — | Enable Dependabot security updates on new repos. |
+| `dependency_graph_enabled_for_new_repositories` | — | Enable dependency graph on new repos. |
+| `secret_scanning_enabled_for_new_repositories` | — | Enable secret scanning on new repos. |
+| `secret_scanning_push_protection_enabled_for_new_repositories` | — | Enable secret-scanning push protection on new repos. |
+| `secret_scanning_push_protection_custom_link_enabled` | — | Show a custom link in push-protection blocks. |
+| `secret_scanning_push_protection_custom_link` | — | URL for the push-protection custom link. |
+| `actions` | — | Nested org Actions policy (below). |
+| `interaction_limits` | — | Nested org-wide interaction limit (below). |
+| `custom_property_definitions` | — | Nested org custom-property definitions (below). |
+| `rulesets` | — | Nested org rulesets (same shape as repo `rulesets`). |
+
+**`organization.actions`**
+
+| Key | Default | Purpose |
+| --- | --- | --- |
+| `enabled_repositories` | — | Which repos may run Actions: `all` \| `none` \| `selected`. |
+| `allowed_actions` | — | Which actions are permitted: `all` \| `local_only` \| `selected`. |
+| `default_workflow_permissions` | — | Default `GITHUB_TOKEN` scope: `read` \| `write`. |
+| `can_approve_pull_request_reviews` | — | Allow Actions to approve pull request reviews. |
+
+**`organization.interaction_limits`**
+
+| Key | Default | Purpose |
+| --- | --- | --- |
+| `limit` | — | `existing_users` \| `contributors_only` \| `collaborators_only`. `null` removes any active limit. |
+| `expiry` | — | `one_day` \| `three_days` \| `one_week` \| `one_month` \| `six_months`. |
+
+**`organization.custom_property_definitions[]`**
+
+| Key | Default | Purpose |
+| --- | --- | --- |
+| `property_name` | required | Name of the org custom-property definition. |
+| `value_type` | required | `string` \| `single_select` \| `multi_select` \| `true_false`. |
+| `required` | — | Whether the property is required on repos. |
+| `default_value` | — | Default value (string or list). |
+| `description` | — | Human description of the property. |
+| `allowed_values` | — | Permitted values for select-type properties. |
+
 ## Overlays (suborgs + per-repo overrides)
 
 The top-level block is the org-wide **base**. Two overlay layers refine it:
@@ -641,6 +952,18 @@ repos:
     fields it sets, and unset fields fall through to the base. **Every other
     tier** (`labels`, `branches`, `variables`, …) is **replaced wholesale** when
     an overlay declares it: a list is an all-or-nothing statement.
+
+**Fields** — `suborgs[]` and `repos[]` carry the structural keys below **plus every
+repository-scoped tier** (`repository`, `branches`, `rulesets`, `files`, `labels`,
+`milestones`, `collaborators`, `teams`, `autolinks`, `custom_properties`,
+`interaction_limits`, `actions`, `variables`, `secrets`, `environments`, `pages` — each
+documented in its own section above).
+
+| Key | Default | Purpose |
+| --- | --- | --- |
+| `suborgs[].name` | required | Label for logs/diagnostics identifying this sub-org overlay. |
+| `suborgs[].repos` | — | Repo-name globs defining which repos this overlay applies to. |
+| `repos[].name` | required | Repo name or glob this per-repo override matches. |
 
 ## The generated JSON Schema
 
