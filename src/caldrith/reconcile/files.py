@@ -32,7 +32,7 @@ from caldrith.reconcile.base import RepoTier, TierResult
 from caldrith.reconcile.planner import TargetRepo
 from caldrith.reconcile.selection import matches_any
 
-_BRANCH = "caldrith/managed-files"
+_BRANCH = "ci/caldrith/managed-files"
 _COMMIT_MESSAGE = "chore: provision required workflows (caldrith)"
 _PR_TITLE = "Caldrith: provision required workflows"
 _PR_BODY = (
