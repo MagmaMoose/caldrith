@@ -2,6 +2,20 @@
 
 <!-- version list -->
 
+## v1.6.0 (2026-06-23)
+
+### Chores
+
+- Update caldrith image
+  ([`b2c638d`](https://github.com/MagmaMoose/caldrith/commit/b2c638d67afa36cb105307dc8053c47c63ab98cb))
+
+### Features
+
+- **files**: Prune orphaned managed files from the provisioning PR
+  ([#20](https://github.com/MagmaMoose/caldrith/pull/20),
+  [`cc986c0`](https://github.com/MagmaMoose/caldrith/commit/cc986c0fc9e69f11b2fb2aa617160040b0b4d6ab))
+
+
 ## v1.5.1 (2026-06-23)
 
 ### Bug Fixes
