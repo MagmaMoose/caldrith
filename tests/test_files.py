@@ -447,9 +447,7 @@ async def test_close_branch_surfaces_real_delete_ref_failure() -> None:
     respx.get(_CONTENTS, params={"ref": "main"}).mock(return_value=httpx.Response(404))
     _compare((rel, "added"))
     close = respx.patch(url__regex=rf"{_PULLS}/\d+").mock(return_value=httpx.Response(200, json={}))
-    respx.get(_PULLS).mock(
-        return_value=httpx.Response(200, json=[{"number": 9, "html_url": "u"}])
-    )
+    respx.get(_PULLS).mock(return_value=httpx.Response(200, json=[{"number": 9, "html_url": "u"}]))
     respx.delete(_REF).mock(return_value=httpx.Response(422, json={"message": "protected"}))
 
     managed = ManagedFile(path=_PATH, content=CONTENT, skip_repos=["wid*"])
