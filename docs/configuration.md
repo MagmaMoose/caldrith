@@ -122,6 +122,7 @@ caldrith diffs desired vs. live and can't tell in advance that the apply will be
 | `rulesets` — repo rulesets | public repos | GitHub Pro / Team / Enterprise |
 | `repository.security_and_analysis` — secret scanning + push protection | public repos | **GitHub Secret Protection** (Team / Enterprise, per active committer) |
 | `repository.security_and_analysis` — `advanced_security` / code scanning | public repos | **GitHub Code Security** (Team / Enterprise, per active committer) |
+| `rulesets` — `code_quality` / code-coverage merge gates (+ enabling Code Quality via `security_and_analysis`) | public repos | **GitHub Code Quality** (Team / Enterprise, per active committer) |
 | `environments` — required `reviewers` | public repos | GitHub Enterprise |
 | `environments` — `deployment_branch_policy` | public repos | GitHub Pro / Team / Enterprise |
 | `pages` on a private repo | public repos | GitHub Pro / Team / Enterprise |
@@ -494,12 +495,27 @@ branch/tag rules and their key parameters:
 | `commit_message_pattern`, `commit_author_email_pattern`, `committer_email_pattern`, `branch_name_pattern`, `tag_name_pattern` | `operator: starts_with\|ends_with\|contains\|regex`, `pattern`, `name?`, `negate?` |
 
 `push` rulesets (`target: push`) add file rules — `file_path_restriction`,
-`file_extension_restriction`, `max_file_path_length`, `max_file_size`, `code_scanning` —
-several of which require GitHub Advanced Security. For the complete, current list and
-exact parameter shapes, see GitHub's
+`file_extension_restriction`, `max_file_path_length`, `max_file_size`.
+
+Other rules gate a merge on one of GitHub's paid security/quality products and need the
+matching per-committer licence:
+
+- `code_scanning` — block on code-scanning alert severity / analysis state (**GitHub Code
+  Security**).
+- `code_quality` — block a PR that doesn't meet a **code-quality** severity threshold, and
+  **code-coverage** gates that block below a coverage threshold (**GitHub Code Quality** —
+  [GA 20 July 2026](https://github.blog/changelog/2026-06-16-github-code-quality-generally-available-july-20-2026/);
+  [coverage on PRs](https://github.blog/changelog/2026-05-26-code-coverage-in-pull-requests-is-now-in-public-preview/)
+  entered preview May 2026). Enabling Code Quality on a repo is a code-security-and-analysis
+  setting, so it goes through `repository.security_and_analysis` (passthrough); the merge
+  gate is this ruleset rule.
+
+caldrith special-cases **no** rule — `rules` is a passthrough list — so you can declare any
+of these today without a caldrith change. Because these are new/evolving, take the exact
+`type` and parameter names from GitHub's
 [Available rules for rulesets](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-rulesets/available-rules-for-rulesets)
-and the [Rules REST reference](https://docs.github.com/en/rest/repos/rules); caldrith
-passes whatever you declare through unchanged.
+and the [Rules REST reference](https://docs.github.com/en/rest/repos/rules) rather than
+hard-coding them from memory.
 
 !!! note "Two ways to require signed commits"
     A ruleset `required_signatures` rule and `branches[].protection.required_signatures`
