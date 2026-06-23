@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import json
 
 import httpx
 import pytest
@@ -24,6 +25,7 @@ _REFS = f"{_REPO}/git/refs"
 _REF = f"{_REPO}/git/refs/heads/{_BRANCH}"  # delete-ref endpoint (plural "refs")
 _PULLS = f"{_REPO}/pulls"
 _COMPARE = f"{_REPO}/compare/main...{_BRANCH}"
+_GRAPHQL = "https://api.github.com/graphql"
 
 CONTENT = "name: Security\non: [pull_request]\n"
 
@@ -57,6 +59,34 @@ def _open_pr(number: int = 9) -> None:
     respx.get(_PULLS).mock(
         return_value=httpx.Response(200, json=[{"number": number, "html_url": url}])
     )
+
+
+def _mock_commit(oid: str = "newoid") -> respx.Route:
+    """Mock the GraphQL createCommitOnBranch mutation (the signed-commit endpoint)."""
+    return respx.post(_GRAPHQL).mock(
+        return_value=httpx.Response(
+            200, json={"data": {"createCommitOnBranch": {"commit": {"oid": oid}}}}
+        )
+    )
+
+
+def _committed(route: respx.Route) -> dict:
+    """Return the createCommitOnBranch `fileChanges` from the last GraphQL request."""
+    body = json.loads(route.calls.last.request.content)
+    return body["variables"]["input"]["fileChanges"]
+
+
+def _added_paths(route: respx.Route) -> list[str]:
+    return [a["path"] for a in _committed(route).get("additions", [])]
+
+
+def _deleted_paths(route: respx.Route) -> list[str]:
+    return [d["path"] for d in _committed(route).get("deletions", [])]
+
+
+def _added_content(route: respx.Route, path: str) -> str:
+    add = next(a for a in _committed(route)["additions"] if a["path"] == path)
+    return base64.b64decode(add["contents"]).decode()
 
 
 def _file(content: str, sha: str = "abc") -> httpx.Response:
@@ -93,10 +123,8 @@ async def test_provisions_when_absent_opens_pr() -> None:
         return_value=httpx.Response(200, json={"object": {"sha": "deadbeef"}})
     )
     create_ref = respx.post(_REFS).mock(return_value=httpx.Response(201, json={}))
-    respx.get(_CONTENTS, params={"ref": _BRANCH}).mock(
-        return_value=httpx.Response(404)
-    )
-    put = respx.put(_CONTENTS).mock(return_value=httpx.Response(201, json={}))
+    respx.get(_CONTENTS, params={"ref": _BRANCH}).mock(return_value=httpx.Response(404))
+    commit = _mock_commit()
     respx.get(_PULLS).mock(return_value=httpx.Response(200, json=[]))  # no open PR
     create_pr = respx.post(_PULLS).mock(
         return_value=httpx.Response(201, json={"html_url": "https://github.com/acme/widget/pull/1"})
@@ -105,7 +133,8 @@ async def test_provisions_when_absent_opens_pr() -> None:
     async with GitHub("token") as client:
         result = await FileProvisioner(client).apply(TargetRepo("acme", "widget"), [_managed()])
 
-    assert create_ref.called and put.called and create_pr.called
+    assert create_ref.called and commit.called and create_pr.called
+    assert _added_paths(commit) == [_PATH]  # one signed commit adds the file
     assert result.files == [_PATH]
     assert result.pr_url == "https://github.com/acme/widget/pull/1"
     assert result.applied is True
@@ -116,12 +145,12 @@ async def test_noop_when_already_matching() -> None:
     _mock_repo()
     respx.get(_CONTENTS, params={"ref": "main"}).mock(return_value=_file(CONTENT))  # matches
     _no_branch()
-    put = respx.put(_CONTENTS).mock(return_value=httpx.Response(201, json={}))
+    commit = _mock_commit()
 
     async with GitHub("token") as client:
         result = await FileProvisioner(client).apply(TargetRepo("acme", "widget"), [_managed()])
 
-    assert not put.called
+    assert not commit.called
     assert result.changed is False
 
 
@@ -130,14 +159,14 @@ async def test_create_only_does_not_overwrite_existing() -> None:
     _mock_repo()
     respx.get(_CONTENTS, params={"ref": "main"}).mock(return_value=_file("different"))
     _no_branch()
-    put = respx.put(_CONTENTS).mock(return_value=httpx.Response(201, json={}))
+    commit = _mock_commit()
 
     async with GitHub("token") as client:
         result = await FileProvisioner(client).apply(
             TargetRepo("acme", "widget"), [_managed(create_only=True)]
         )
 
-    assert not put.called  # create_only -> never overwrite
+    assert not commit.called  # create_only -> never overwrite
     assert result.changed is False
 
 
@@ -150,9 +179,9 @@ async def test_updates_drifted_and_reuses_open_pr() -> None:
     _compare((_PATH, "modified"))
     respx.get(_BRANCH_REF).mock(return_value=httpx.Response(200, json={"object": {"sha": "b"}}))
     respx.get(_CONTENTS, params={"ref": _BRANCH}).mock(
-        return_value=_file("old content", sha="branchsha")  # branch still has old -> PUT
+        return_value=_file("old content", sha="branchsha")  # branch still has old -> update
     )
-    put = respx.put(_CONTENTS).mock(return_value=httpx.Response(200, json={}))
+    commit = _mock_commit()
     respx.get(_PULLS).mock(  # a PR is already open -> reuse, don't duplicate
         return_value=httpx.Response(
             200, json=[{"html_url": "https://github.com/acme/widget/pull/7"}]
@@ -163,10 +192,8 @@ async def test_updates_drifted_and_reuses_open_pr() -> None:
     async with GitHub("token") as client:
         result = await FileProvisioner(client).apply(TargetRepo("acme", "widget"), [_managed()])
 
-    assert put.called
-    assert not create_pr.called  # reused existing PR
-    body = put.calls.last.request.content
-    assert b"branchsha" in body  # updated with the existing blob sha
+    assert commit.called and not create_pr.called  # one signed commit; existing PR reused
+    assert _added_content(commit, _PATH) == CONTENT  # updated to the declared content
     assert result.pr_url == "https://github.com/acme/widget/pull/7"
 
 
@@ -175,7 +202,7 @@ async def test_dry_run_never_writes() -> None:
     _mock_repo()
     respx.get(_CONTENTS, params={"ref": "main"}).mock(return_value=httpx.Response(404))
     _no_branch()
-    put = respx.put(_CONTENTS).mock(return_value=httpx.Response(201, json={}))
+    commit = _mock_commit()
     create_pr = respx.post(_PULLS).mock(return_value=httpx.Response(201, json={"html_url": "x"}))
 
     async with GitHub("token") as client:
@@ -183,7 +210,7 @@ async def test_dry_run_never_writes() -> None:
             TargetRepo("acme", "widget"), [_managed()]
         )
 
-    assert not put.called and not create_pr.called
+    assert not commit.called and not create_pr.called
     assert result.files == [_PATH] and result.applied is False
 
 
@@ -194,7 +221,7 @@ async def test_skip_repos_excludes_file_for_matching_repo() -> None:
     _mock_repo()
     _no_branch()
     contents = respx.get(_CONTENTS, params={"ref": "main"}).mock(return_value=httpx.Response(404))
-    put = respx.put(_CONTENTS).mock(return_value=httpx.Response(201, json={}))
+    commit = _mock_commit()
     create_pr = respx.post(_PULLS).mock(return_value=httpx.Response(201, json={"html_url": "x"}))
 
     managed = ManagedFile(path=_PATH, content=CONTENT, skip_repos=["wid*"])
@@ -202,7 +229,7 @@ async def test_skip_repos_excludes_file_for_matching_repo() -> None:
         result = await FileProvisioner(client).apply(TargetRepo("acme", "widget"), [managed])
 
     assert not contents.called  # skipped before any lookup
-    assert not put.called and not create_pr.called
+    assert not commit.called and not create_pr.called
     assert result.changed is False
 
 
@@ -216,7 +243,7 @@ async def test_create_only_skips_when_sibling_extension_exists() -> None:
     _no_branch()
     respx.get(rel_yaml, params={"ref": "main"}).mock(return_value=httpx.Response(404))
     respx.get(rel_yml, params={"ref": "main"}).mock(return_value=_file("name: Release\n"))
-    put = respx.put(rel_yaml).mock(return_value=httpx.Response(201, json={}))
+    commit = _mock_commit()
 
     managed = ManagedFile(
         path=".github/workflows/release.yaml",
@@ -226,7 +253,7 @@ async def test_create_only_skips_when_sibling_extension_exists() -> None:
     async with GitHub("token") as client:
         result = await FileProvisioner(client).apply(TargetRepo("acme", "widget"), [managed])
 
-    assert not put.called  # sibling release.yml present -> no duplicate
+    assert not commit.called  # sibling release.yml present -> no duplicate
     assert result.changed is False
 
 
@@ -240,13 +267,13 @@ async def test_empty_repo_skipped_gracefully() -> None:
     respx.get(_BRANCH_REF).mock(return_value=httpx.Response(404))
     respx.get(_MAIN_REF).mock(return_value=httpx.Response(404))  # no base commit
     create_ref = respx.post(_REFS).mock(return_value=httpx.Response(201, json={}))
-    put = respx.put(_CONTENTS).mock(return_value=httpx.Response(201, json={}))
+    commit = _mock_commit()
     create_pr = respx.post(_PULLS).mock(return_value=httpx.Response(201, json={"html_url": "x"}))
 
     async with GitHub("token") as client:
         result = await FileProvisioner(client).apply(TargetRepo("acme", "widget"), [_managed()])
 
-    assert not create_ref.called and not put.called and not create_pr.called
+    assert not create_ref.called and not commit.called and not create_pr.called
     assert result.changed is False and result.applied is False
 
 
@@ -264,10 +291,9 @@ async def test_prunes_added_orphan_and_reuses_pr() -> None:
     respx.get(rel_url, params={"ref": _BRANCH}).mock(
         return_value=_file("name: Release\n", sha="relsha")
     )
-    delete = respx.delete(rel_url).mock(return_value=httpx.Response(200, json={}))
-    # security.yml already staged correctly on the branch -> no re-commit.
+    # security.yml already staged correctly on the branch -> not re-added.
     respx.get(_CONTENTS, params={"ref": _BRANCH}).mock(return_value=_file(CONTENT))
-    put = respx.put(_CONTENTS).mock(return_value=httpx.Response(200, json={}))
+    commit = _mock_commit()
     respx.get(_PULLS).mock(  # existing open PR -> reuse, don't duplicate
         return_value=httpx.Response(
             200, json=[{"html_url": "https://github.com/acme/widget/pull/9"}]
@@ -278,9 +304,8 @@ async def test_prunes_added_orphan_and_reuses_pr() -> None:
     async with GitHub("token") as client:
         result = await FileProvisioner(client).apply(TargetRepo("acme", "widget"), [_managed()])
 
-    assert delete.called
-    assert b"relsha" in delete.calls.last.request.content  # deleted with the branch blob sha
-    assert not put.called and not create_pr.called  # security already staged; PR reused
+    assert commit.called and not create_pr.called  # one signed commit; PR reused
+    assert _deleted_paths(commit) == [rel] and _added_paths(commit) == []  # only the orphan dropped
     assert result.files == [_PATH] and result.removed == [rel]
     assert result.pr_url == "https://github.com/acme/widget/pull/9"
     assert result.applied is True
@@ -304,9 +329,7 @@ async def test_reverts_modified_orphan_to_base() -> None:
         return_value=_file("caldrith edit\n", sha="legsha")
     )
     respx.get(legacy_url, params={"ref": "main"}).mock(return_value=_file("repo original\n"))
-    security_put = respx.put(_CONTENTS).mock(return_value=httpx.Response(200, json={}))
-    revert = respx.put(legacy_url).mock(return_value=httpx.Response(200, json={}))
-    delete = respx.delete(legacy_url).mock(return_value=httpx.Response(200, json={}))
+    commit = _mock_commit()
     respx.get(_PULLS).mock(
         return_value=httpx.Response(
             200, json=[{"number": 9, "html_url": "https://github.com/acme/widget/pull/9"}]
@@ -316,11 +339,10 @@ async def test_reverts_modified_orphan_to_base() -> None:
     async with GitHub("token") as client:
         result = await FileProvisioner(client).apply(TargetRepo("acme", "widget"), [_managed()])
 
-    assert revert.called and not delete.called  # reverted to base, not deleted
-    body = revert.calls.last.request.content.decode()
-    assert base64.b64encode(b"repo original\n").decode() in body  # restored base content
-    assert "legsha" in body  # over the branch blob sha
-    assert not security_put.called  # security.yml already staged on the branch
+    # The orphan is reverted (re-added with the base content), not deleted; security.yml
+    # is already staged so it is not re-added.
+    assert _added_paths(commit) == [legacy] and _deleted_paths(commit) == []
+    assert _added_content(commit, legacy) == "repo original\n"
     assert result.files == [_PATH] and result.removed == [legacy]
     assert result.applied is True
 
@@ -328,20 +350,18 @@ async def test_reverts_modified_orphan_to_base() -> None:
 @respx.mock
 async def test_dry_run_reports_removed_without_writing() -> None:
     rel = ".github/workflows/release.yaml"
-    rel_url = f"{_REPO}/contents/{rel}"
     _mock_repo()
     # security.yml is in sync with the base, so nothing new is provisioned.
     respx.get(_CONTENTS, params={"ref": "main"}).mock(return_value=_file(CONTENT))
     _compare((rel, "added"))
-    delete = respx.delete(rel_url).mock(return_value=httpx.Response(200, json={}))
-    put = respx.put(_CONTENTS).mock(return_value=httpx.Response(200, json={}))
+    commit = _mock_commit()
 
     async with GitHub("token") as client:
         result = await FileProvisioner(client, dry_run=True).apply(
             TargetRepo("acme", "widget"), [_managed()]
         )
 
-    assert not delete.called and not put.called
+    assert not commit.called
     assert result.files == [] and result.removed == [rel]
     assert result.applied is False
 
@@ -466,14 +486,13 @@ async def test_prunes_multiple_added_orphans_in_one_run() -> None:
     _on_branch(_CONTENTS, CONTENT)  # security already staged
     _on_branch(rel_url, "r", sha="rs")
     _on_branch(legacy_url, "l", sha="ls")
-    del_rel = respx.delete(rel_url).mock(return_value=httpx.Response(200, json={}))
-    del_legacy = respx.delete(legacy_url).mock(return_value=httpx.Response(200, json={}))
+    commit = _mock_commit()
     _open_pr()
 
     async with GitHub("token") as client:
         result = await FileProvisioner(client).apply(TargetRepo("acme", "widget"), [_managed()])
 
-    assert del_rel.called and del_legacy.called
+    assert _deleted_paths(commit) == [rel, legacy] and _added_paths(commit) == []  # one commit
     assert result.removed == [rel, legacy] and result.files == [_PATH]
 
 
@@ -492,15 +511,13 @@ async def test_modified_orphan_deleted_when_repo_dropped_its_own_copy() -> None:
     _on_branch(legacy_url, "caldrith edit\n", sha="legsha")
     # The repo deleted its own copy on the default branch.
     respx.get(legacy_url, params={"ref": "main"}).mock(return_value=httpx.Response(404))
-    revert = respx.put(legacy_url).mock(return_value=httpx.Response(200, json={}))
-    delete = respx.delete(legacy_url).mock(return_value=httpx.Response(200, json={}))
+    commit = _mock_commit()
     _open_pr()
 
     async with GitHub("token") as client:
         result = await FileProvisioner(client).apply(TargetRepo("acme", "widget"), [_managed()])
 
-    assert delete.called and not revert.called  # base gone -> delete, don't revert
-    assert b"legsha" in delete.calls.last.request.content
+    assert _deleted_paths(commit) == [legacy] and _added_paths(commit) == []  # base gone -> delete
     assert result.removed == [legacy]
 
 
@@ -518,14 +535,13 @@ async def test_modified_orphan_noop_when_branch_already_matches_base() -> None:
     _on_branch(_CONTENTS, CONTENT, sha="secsha")
     _on_branch(legacy_url, "same\n", sha="legsha")
     respx.get(legacy_url, params={"ref": "main"}).mock(return_value=_file("same\n"))
-    revert = respx.put(legacy_url).mock(return_value=httpx.Response(200, json={}))
-    delete = respx.delete(legacy_url).mock(return_value=httpx.Response(200, json={}))
+    commit = _mock_commit()
     _open_pr()
 
     async with GitHub("token") as client:
         await FileProvisioner(client).apply(TargetRepo("acme", "widget"), [_managed()])
 
-    assert not revert.called and not delete.called  # branch already matches base
+    assert not commit.called  # branch already matches base -> empty changeset, no commit
 
 
 @respx.mock
@@ -541,11 +557,11 @@ async def test_prune_skips_orphan_already_absent_on_branch() -> None:
     _on_branch(_CONTENTS, CONTENT)  # security staged
     # The orphan compare reported is no longer on the branch (gone between calls).
     respx.get(rel_url, params={"ref": _BRANCH}).mock(return_value=httpx.Response(404))
-    delete = respx.delete(rel_url).mock(return_value=httpx.Response(200, json={}))
+    commit = _mock_commit()
     _open_pr()
 
     async with GitHub("token") as client:
         result = await FileProvisioner(client).apply(TargetRepo("acme", "widget"), [_managed()])
 
-    assert not delete.called  # nothing to delete — already absent
+    assert not commit.called  # orphan already absent + security staged -> empty changeset
     assert result.applied is True
