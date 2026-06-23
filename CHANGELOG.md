@@ -2,6 +2,33 @@
 
 <!-- version list -->
 
+## v1.6.1 (2026-06-23)
+
+### Bug Fixes
+
+- **files**: Author managed-file commits via signed createCommitOnBranch
+  ([#22](https://github.com/MagmaMoose/caldrith/pull/22),
+  [`0f53403`](https://github.com/MagmaMoose/caldrith/commit/0f534039c92bb632256a504ff8c3338f54697472))
+
+### Chores
+
+- Provision required workflows (caldrith) ([#18](https://github.com/MagmaMoose/caldrith/pull/18),
+  [`bd1e066`](https://github.com/MagmaMoose/caldrith/commit/bd1e06626503a97371cecde8d43e2d9ebf7bf572))
+
+- Update caldrith image
+  ([`0fa4b5e`](https://github.com/MagmaMoose/caldrith/commit/0fa4b5edd56ee6935bb66d41317714fdf8353b4d))
+
+### Documentation
+
+- **configuration**: Add a Key|Default|Purpose reference table for every setting
+  ([#21](https://github.com/MagmaMoose/caldrith/pull/21),
+  [`8177a14`](https://github.com/MagmaMoose/caldrith/commit/8177a143a46c082bbc6c943abfa2ee5d79f12c73))
+
+- **configuration**: Flag plan-gated (paid) settings
+  ([#23](https://github.com/MagmaMoose/caldrith/pull/23),
+  [`e2b2b02`](https://github.com/MagmaMoose/caldrith/commit/e2b2b024d8026ce467fa3cbcaa21bf36e6112cee))
+
+
 ## v1.6.0 (2026-06-23)
 
 ### Chores
