@@ -5,6 +5,11 @@ PR from a stable branch (``ci/caldrith/managed-files``) that adds, updates, and 
 the declared files, so a human/automation merges it. This is how required workflows
 (the Chargate gate, a Diatreme release) get rolled out org-wide.
 
+A run's adds, updates and prunes go into **one commit**, authored through the GraphQL
+``createCommitOnBranch`` mutation so GitHub signs it on the App's behalf — the managed
+PR's commits show as **Verified**. (The REST contents API does not sign a third-party
+App's commits, so they would otherwise show as unverified.)
+
 Idempotent and non-destructive:
 - A file already matching ``content`` on the default branch is skipped.
 - ``create_only`` files are written only when absent (never overwrite a repo's own),
@@ -31,7 +36,6 @@ from __future__ import annotations
 
 import base64
 from dataclasses import dataclass, field
-from typing import Any
 
 from githubkit import GitHub
 from githubkit.exception import RequestFailed
@@ -44,12 +48,22 @@ from caldrith.reconcile.selection import matches_any
 
 _BRANCH = "ci/caldrith/managed-files"
 _COMMIT_MESSAGE = "chore: provision required workflows (caldrith)"
-_PRUNE_MESSAGE = "chore: drop no-longer-required workflow (caldrith)"
 _PR_TITLE = "Caldrith: provision required workflows"
 _PR_BODY = (
     "Caldrith manages these files org-wide. Merging brings this repo in line with the "
     "organisation's required workflows; Caldrith keeps them in sync thereafter."
 )
+
+# GraphQL mutation that authors a (GitHub-signed, hence Verified) commit on a branch.
+_COMMIT_MUTATION = """
+mutation ($input: CreateCommitOnBranchInput!) {
+  createCommitOnBranch(input: $input) {
+    commit {
+      oid
+    }
+  }
+}
+"""
 
 
 def _sibling_ext_path(path: str) -> str | None:
@@ -64,6 +78,11 @@ def _sibling_ext_path(path: str) -> str | None:
     if path.endswith(".yml"):
         return path[: -len(".yml")] + ".yaml"
     return None
+
+
+def _b64(text: str) -> str:
+    """Base64-encode ``text`` (the encoding GitHub's file-content APIs expect)."""
+    return base64.b64encode(text.encode()).decode()
 
 
 @dataclass
@@ -120,18 +139,21 @@ class FileProvisioner:
         )
         return repo.get("default_branch") or "main"
 
-    async def _ensure_branch(self, target: TargetRepo, base: str) -> bool:
-        """Ensure the managed PR branch exists (create from ``base`` HEAD if missing).
+    async def _ensure_branch(self, target: TargetRepo, base: str) -> str | None:
+        """Ensure the managed PR branch exists and return its head commit OID.
 
-        Returns ``False`` when there is no ``base`` commit to branch from (an empty
-        repository), so the caller skips it instead of crashing — there is nothing to
-        provision into a repo with no commits yet.
+        Creates the branch from ``base`` HEAD if missing. Returns ``None`` when there is
+        no ``base`` commit to branch from (an empty repository), so the caller skips it
+        instead of crashing — there is nothing to provision into a repo with no commits
+        yet. The OID is the ``expectedHeadOid`` for the signing commit mutation.
         """
         try:
-            await self._client.rest.git.async_get_ref(
-                owner=target.owner, repo=target.name, ref=f"heads/{_BRANCH}"
+            ref = response_json(
+                await self._client.rest.git.async_get_ref(
+                    owner=target.owner, repo=target.name, ref=f"heads/{_BRANCH}"
+                )
             )
-            return True  # already exists — reuse it
+            return ref["object"]["sha"]  # already exists — reuse it
         except RequestFailed as exc:
             if exc.response.status_code != 404:
                 raise
@@ -143,14 +165,15 @@ class FileProvisioner:
             )
         except RequestFailed as exc:
             if exc.response.status_code == 404:
-                return False  # empty repo: the default branch has no commit
+                return None  # empty repo: the default branch has no commit
             raise
+        sha = base_ref["object"]["sha"]
         await self._client.rest.git.async_create_ref(
             owner=target.owner,
             repo=target.name,
-            data={"ref": f"refs/heads/{_BRANCH}", "sha": base_ref["object"]["sha"]},
+            data={"ref": f"refs/heads/{_BRANCH}", "sha": sha},
         )
-        return True
+        return sha
 
     async def _ensure_pr(self, target: TargetRepo, base: str) -> str:
         """Return the URL of the managed PR, opening one if none is open."""
@@ -235,44 +258,74 @@ class FileProvisioner:
                 orphans.append((path, status))
         return orphans
 
-    async def _delete_on_branch(self, target: TargetRepo, path: str, blob_sha: str) -> None:
-        """Delete ``path`` from the managed branch (its blob ``sha`` on that branch)."""
-        await self._client.rest.repos.async_delete_file(
-            owner=target.owner,
-            repo=target.name,
-            path=path,
-            data={"message": _PRUNE_MESSAGE, "sha": blob_sha, "branch": _BRANCH},
-        )
+    async def _build_changes(
+        self,
+        target: TargetRepo,
+        base: str,
+        needed: list[ManagedFile],
+        orphans: list[tuple[str, str]],
+    ) -> tuple[list[dict[str, str]], list[dict[str, str]]]:
+        """Compute the ``(additions, deletions)`` the managed branch needs this run.
 
-    async def _prune(self, target: TargetRepo, base: str, path: str, status: str) -> None:
-        """Undo caldrith's no-longer-declared change to ``path`` on the managed branch.
-
-        ``added`` -> delete the net-new file. ``modified`` -> restore the default
-        branch's content (the file belongs to the repo — only caldrith's edit is
-        reverted), unless the repo has since deleted its own copy on the default branch,
-        in which case caldrith's stale copy is deleted too rather than left behind.
+        A declared file is added/updated only when the branch's copy differs (so a re-run
+        while the PR is pending stages nothing). An orphan caldrith ``added`` is deleted;
+        one it had only ``modified`` is reverted to the default branch's content, or
+        deleted if the repo has since removed its own copy. Shapes match the GraphQL
+        ``FileChanges`` input: additions are ``{path, contents}`` (base64), deletions
+        ``{path}``.
         """
-        branch_content, blob_sha = await self._get_file(target, path, _BRANCH)
-        if blob_sha is None:
-            return  # already absent on the branch
-        if status == "added":
-            await self._delete_on_branch(target, path, blob_sha)
-            return
-        base_content, _ = await self._get_file(target, path, base)
-        if base_content is None:
-            await self._delete_on_branch(target, path, blob_sha)  # repo dropped its own copy
-            return
-        if base_content == branch_content:
-            return  # branch already matches the default branch — nothing to restore
-        await self._client.rest.repos.async_create_or_update_file_contents(
-            owner=target.owner,
-            repo=target.name,
-            path=path,
-            data={
-                "message": _PRUNE_MESSAGE,
-                "content": base64.b64encode(base_content.encode()).decode(),
-                "branch": _BRANCH,
-                "sha": blob_sha,
+        additions: list[dict[str, str]] = []
+        deletions: list[dict[str, str]] = []
+        for managed in needed:
+            branch_content, _ = await self._get_file(target, managed.path, _BRANCH)
+            if branch_content == managed.content:
+                continue  # already staged on the branch
+            additions.append({"path": managed.path, "contents": _b64(managed.content)})
+        for path, status in orphans:
+            branch_content, blob_sha = await self._get_file(target, path, _BRANCH)
+            if blob_sha is None:
+                continue  # already absent on the branch
+            if status == "added":
+                deletions.append({"path": path})  # net-new file caldrith added
+                continue
+            base_content, _ = await self._get_file(target, path, base)
+            if base_content is None:
+                deletions.append({"path": path})  # repo dropped its own copy
+            elif base_content != branch_content:
+                additions.append({"path": path, "contents": _b64(base_content)})  # revert
+        return additions, deletions
+
+    async def _commit_on_branch(
+        self,
+        target: TargetRepo,
+        head_oid: str,
+        additions: list[dict[str, str]],
+        deletions: list[dict[str, str]],
+    ) -> None:
+        """Author one signed commit on the managed branch via GraphQL.
+
+        ``createCommitOnBranch`` attributes the commit to the App's installation identity
+        and GitHub signs it, so the managed PR's commits are **Verified** (unlike the REST
+        contents API, which leaves a third-party App's commits unsigned). ``head_oid`` is
+        the expected current branch head — GitHub rejects the mutation if it has moved.
+        """
+        file_changes: dict[str, list[dict[str, str]]] = {}
+        if additions:
+            file_changes["additions"] = additions
+        if deletions:
+            file_changes["deletions"] = deletions
+        await self._client.async_graphql(
+            _COMMIT_MUTATION,
+            {
+                "input": {
+                    "branch": {
+                        "repositoryNameWithOwner": target.full_name,
+                        "branchName": _BRANCH,
+                    },
+                    "message": {"headline": _COMMIT_MESSAGE},
+                    "expectedHeadOid": head_oid,
+                    "fileChanges": file_changes,
+                }
             },
         )
 
@@ -321,27 +374,17 @@ class FileProvisioner:
             result.applied = True
             return result
 
-        if not await self._ensure_branch(target, default_branch):
+        head_oid = await self._ensure_branch(target, default_branch)
+        if head_oid is None:
             # Empty repository: no base commit to branch a PR from. Skip gracefully.
             result.files = []
             result.removed = []
             return result
-        for path, status in orphans:
-            await self._prune(target, default_branch, path, status)
-        for managed in needed:
-            branch_content, blob_sha = await self._get_file(target, managed.path, _BRANCH)
-            if branch_content == managed.content:
-                continue  # already staged on the PR branch
-            data: dict[str, Any] = {
-                "message": _COMMIT_MESSAGE,
-                "content": base64.b64encode(managed.content.encode()).decode(),
-                "branch": _BRANCH,
-            }
-            if blob_sha is not None:
-                data["sha"] = blob_sha
-            await self._client.rest.repos.async_create_or_update_file_contents(
-                owner=target.owner, repo=target.name, path=managed.path, data=data
-            )
+        additions, deletions = await self._build_changes(
+            target, default_branch, needed, orphans
+        )
+        if additions or deletions:
+            await self._commit_on_branch(target, head_oid, additions, deletions)
         result.pr_url = await self._ensure_pr(target, default_branch)
         result.applied = True
         return result
