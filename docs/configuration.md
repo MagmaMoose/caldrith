@@ -271,6 +271,37 @@ through to `repos.update`).
 | `enableAutomatedSecurityFixes` | — | Toggle Dependabot automated security updates. |
 | `enablePrivateVulnerabilityReporting` | — | Toggle private vulnerability reporting. |
 
+## Code scanning (CodeQL default setup)
+
+A `code_scanning` block enables **CodeQL default setup** — code scanning without a
+committed workflow file — through the API. It's free on public repos; on private/internal
+repos it needs GitHub Code Security (the update is refused, isolated per tier, without it).
+Drift is detected on `state` and, when you declare them, `query_suite` / `languages` (omit
+`languages` to let GitHub auto-detect — they are then not diffed).
+
+```yaml
+code_scanning:
+  state: configured          # configured | not-configured
+  query_suite: extended      # default | extended (optional)
+  # languages: [python, go]  # optional — omit to auto-detect
+```
+
+**Fields**
+
+| Key | Default | Purpose |
+| --- | --- | --- |
+| `state` | required | `configured` (enable CodeQL default setup) or `not-configured` (disable it). |
+| `query_suite` | — | CodeQL query suite: `default` \| `extended`. |
+| `languages` | — | Languages to analyse; omit to let GitHub auto-detect (then not diffed). |
+| `runner_type` | — | `standard` \| `labeled`. |
+| `runner_label` | — | Runner label, when `runner_type: labeled`. |
+
+!!! note "Default setup vs. a workflow"
+    This is the no-workflow path. If you instead provision a CodeQL **workflow** via
+    `files`, don't also set `code_scanning` — pick one, or the two configs fight. To
+    *require* code scanning before merge, pair either with a `required_status_checks`
+    ruleset on the produced check (e.g. `CodeQL`).
+
 ## Branch protection
 
 !!! info "Paid on private repos"
@@ -1209,11 +1240,60 @@ carry them, so private/internal repos never receive them. A repo whose visibilit
 can't determine is treated as **not** matching (safer to skip a paid feature than to apply
 it), and `visibility` combines with `repos` by **AND** when both are set.
 
+### Maximal public-repo hardening
+
+Turn on **everything that's free on public repos** in one `visibility: [public]` suborg —
+the full secret-scanning family, Dependabot, private vulnerability reporting, CodeQL
+default setup, and a branch ruleset that *requires* the results. Private/internal repos
+never receive it, so none of the per-committer charges those features carry off public are
+incurred.
+
+```yaml
+suborgs:
+  - name: public-hardening
+    visibility: [public]
+    repository:
+      security_and_analysis:                       # secret scanning — free on public
+        secret_scanning: { status: enabled }
+        secret_scanning_push_protection: { status: enabled }
+        secret_scanning_validity_checks: { status: enabled }
+        secret_scanning_non_provider_patterns: { status: enabled }
+        secret_scanning_ai_detection: { status: enabled }
+      security:                                     # Dependabot + reporting (free everywhere)
+        enableVulnerabilityAlerts: true
+        enableAutomatedSecurityFixes: true
+        enablePrivateVulnerabilityReporting: true
+    code_scanning:                                 # CodeQL, no workflow file needed
+      state: configured
+      query_suite: extended
+    rulesets:
+      - name: Public hardening gate
+        target: branch
+        enforcement: active
+        conditions: { ref_name: { include: ["~DEFAULT_BRANCH"], exclude: [] } }
+        rules:
+          - type: pull_request
+            parameters: { required_approving_review_count: 1, required_review_thread_resolution: true }
+          - type: required_status_checks
+            parameters: { required_status_checks: [{ context: "CodeQL" }] }
+          - type: required_signatures
+          - type: non_fast_forward
+          # - type: code_quality      # add once GitHub Code Quality is enabled (+ a coverage rule)
+```
+
+- `advanced_security` is deliberately **not** set — it's the paid GHAS toggle for private
+  repos; on public these features are free and the key doesn't apply.
+- `enableAutomatedSecurityFixes` and `security_and_analysis.dependabot_security_updates`
+  are the same control via two paths — use one.
+- Code scanning is **enabled** by `code_scanning` and **required** by the ruleset's
+  `CodeQL` status check; Code Quality / code-coverage gates slot in as ruleset rules once
+  that product is enabled.
+
 **Fields** — `suborgs[]` and `repos[]` carry the structural keys below **plus every
 repository-scoped tier** (`repository`, `branches`, `rulesets`, `files`, `labels`,
 `milestones`, `collaborators`, `teams`, `autolinks`, `custom_properties`,
-`interaction_limits`, `actions`, `variables`, `secrets`, `environments`, `pages` — each
-documented in its own section above).
+`interaction_limits`, `actions`, `variables`, `secrets`, `environments`, `pages`,
+`code_scanning` — each documented in its own section above).
 
 | Key | Default | Purpose |
 | --- | --- | --- |
