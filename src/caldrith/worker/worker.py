@@ -1,9 +1,10 @@
 """ARQ worker settings and job functions.
 
-Two jobs:
-  - ``reconcile_installation``: fan out — list the installation's repos and enqueue
-    one ``reconcile_repo`` per repo so failures stay isolated.
-  - ``reconcile_repo``: reconcile (or dry-run) a single repository.
+Three jobs:
+  - ``reconcile_installation``: fan out — enqueue one ``reconcile_repo`` per managed repo
+    (so failures stay isolated) and, for Organization accounts, one ``reconcile_org``.
+  - ``reconcile_repo``: reconcile (or dry-run) a single repository's tiers.
+  - ``reconcile_org``: reconcile the installation's organization-scoped settings once.
 
 Each job builds a *fresh* per-installation githubkit client (tokens are never shared
 across installations or reused across jobs).
@@ -19,8 +20,10 @@ from arq.connections import RedisSettings
 from caldrith.audit.logging import bind_context, configure_logging, get_logger
 from caldrith.auth.client import GitHubClientFactory
 from caldrith.config.loader import load_admin_config
+from caldrith.reconcile.org import run_org_reconcile
+from caldrith.reconcile.overlay import has_overlays
 from caldrith.reconcile.planner import list_target_repos
-from caldrith.reconcile.runner import run_reconcile
+from caldrith.reconcile.runner import REPO_TIERS, run_reconcile
 from caldrith.reconcile.selection import select_targets
 from caldrith.settings import get_config
 
@@ -50,9 +53,20 @@ async def reconcile_installation(
             config_path=config.config_path,
             settings_file=config.settings_file_path,
         )
-        # Nothing to enforce if there's no repository block — skip the fan-out.
-        if settings_config.repository is None:
-            log.info("reconcile_installation.no_repository_block", owner=owner)
+        # Organization-scoped settings apply once per account (not per repo) — enqueue a
+        # single org reconcile when an organization block is declared.
+        if settings_config.organization is not None:
+            await arq_redis.enqueue_job(
+                "reconcile_org", installation_id=installation_id, owner=owner
+            )
+
+        # Fan out one repo job per managed repo if ANY repo-scoped tier (or an overlay
+        # that may introduce one) is declared; otherwise there's nothing to enforce.
+        repo_work = has_overlays(settings_config) or any(
+            tier.configured(settings_config) for tier in REPO_TIERS
+        )
+        if not repo_work:
+            log.info("reconcile_installation.no_repo_tiers", owner=owner)
             return 0
         all_targets = await list_target_repos(client)
         targets = select_targets(
@@ -72,6 +86,19 @@ async def reconcile_installation(
         )
     log.info("reconcile_installation.fanned_out", count=len(targets))
     return len(targets)
+
+
+async def reconcile_org(
+    ctx: dict[str, Any],
+    *,
+    installation_id: int,
+    owner: str,
+) -> bool:
+    """Reconcile the installation's organization-scoped settings. Returns if changed."""
+    factory: GitHubClientFactory = ctx["client_factory"]
+    async with factory.for_installation(installation_id) as client:
+        summary = await run_org_reconcile(client, installation_id=installation_id, owner=owner)
+    return summary.any_changed
 
 
 async def reconcile_repo(
@@ -112,7 +139,7 @@ async def shutdown(ctx: dict[str, Any]) -> None:
 class WorkerSettings:
     """ARQ worker entrypoint (``arq caldrith.worker.worker.WorkerSettings``)."""
 
-    functions: ClassVar = [reconcile_installation, reconcile_repo]
+    functions: ClassVar = [reconcile_installation, reconcile_repo, reconcile_org]
     on_startup = startup
     on_shutdown = shutdown
     # ARQ reads settings off the class ``__dict__``, so ``redis_settings`` MUST be a

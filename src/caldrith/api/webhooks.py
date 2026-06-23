@@ -7,12 +7,15 @@ Flow (kept well under GitHub's 10s timeout):
   4. Parse the (now trusted) JSON and enqueue the appropriate ARQ job.
   5. Return ``202 Accepted``.
 
-Events handled in P1:
+Events handled:
   - ``push``: a push to the admin repo's default branch -> full-account reconcile.
   - ``repository`` (created/edited): reconcile just that repo.
   - ``pull_request`` (opened/reopened/synchronize) touching the admin repo's settings
     on a *non-default* branch -> DRY-RUN: post a Check Run with the diff, mutate
     nothing.
+  - drift events (``label``, ``milestone``, ``member``, ``branch_protection_rule``,
+    ``repository_ruleset``, ``public``): an out-of-band change to a managed setting
+    re-reconciles the affected repo (or org) back to the declared state — self-healing.
 
 Anything else is acknowledged (202) and ignored. Deferred event types slot in here.
 """
@@ -31,11 +34,27 @@ from caldrith.settings import get_config
 from caldrith.worker.queue import (
     dedup_delivery,
     enqueue_reconcile_installation,
+    enqueue_reconcile_org,
     enqueue_reconcile_repo,
 )
 
 router = APIRouter(tags=["webhooks"])
 _log = get_logger(__name__)
+
+# Out-of-band change events that should self-heal the affected repo: when someone edits a
+# managed setting directly on GitHub, the matching event re-reconciles that repo back to
+# the declared state. A no-op convergence (Caldrith's own write echoing back) detects no
+# drift and issues no further write, so this does not loop.
+_DRIFT_EVENTS = frozenset(
+    {
+        "label",
+        "milestone",
+        "member",
+        "branch_protection_rule",
+        "repository_ruleset",
+        "public",
+    }
+)
 
 
 def _ref_branch(ref: str | None) -> str | None:
@@ -125,6 +144,33 @@ async def _handle_pull_request(arq_redis: Any, payload: dict, installation_id: i
     )
 
 
+async def _handle_drift_event(arq_redis: Any, payload: dict, installation_id: int) -> None:
+    """An out-of-band change to a managed setting re-reconciles the affected scope.
+
+    Most drift events carry a ``repository`` (a repo-scoped change) and re-reconcile that
+    repo. An org-scoped ``repository_ruleset`` event (no repository) re-reconciles the
+    organization instead.
+    """
+    repo = payload.get("repository") or {}
+    owner = (repo.get("owner") or {}).get("login")
+    repo_name = repo.get("name")
+    if owner and repo_name:
+        await enqueue_reconcile_repo(
+            arq_redis,
+            installation_id=installation_id,
+            owner=owner,
+            repo=repo_name,
+            dry_run=False,
+        )
+        return
+
+    # No repository — an organization-scoped ruleset change. Re-reconcile the org.
+    org = payload.get("organization") or {}
+    org_login = org.get("login")
+    if org_login:
+        await enqueue_reconcile_org(arq_redis, installation_id=installation_id, owner=org_login)
+
+
 @router.post("/", status_code=HTTP_202_ACCEPTED)
 async def receive_webhook(
     request: Request,
@@ -175,6 +221,8 @@ async def receive_webhook(
         await _handle_repository(arq_redis, payload, installation_id)
     elif x_github_event == "pull_request":
         await _handle_pull_request(arq_redis, payload, installation_id)
+    elif x_github_event in _DRIFT_EVENTS:
+        await _handle_drift_event(arq_redis, payload, installation_id)
     else:
         log.info("webhook.unhandled_event", gh_event=x_github_event)
 

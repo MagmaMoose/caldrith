@@ -90,8 +90,22 @@ async def test_fan_out_honours_restricted_repos() -> None:
 
 
 @respx.mock
-async def test_fan_out_skips_when_no_repository_block() -> None:
-    _mock_settings("labels:\n  - name: bug\n")  # valid config, but no repository block
+async def test_fan_out_includes_non_repository_tiers() -> None:
+    # A config with no `repository:` block but another repo-scoped tier still fans out.
+    _mock_settings("labels:\n  - name: bug\n")
+    _mock_repos(("widget", False))
+    redis = _FakeArqRedis()
+    ctx = {"client_factory": _FakeFactory(GitHub("token")), "redis": redis}
+
+    count = await reconcile_installation(ctx, installation_id=42, owner="acme")
+
+    assert count == 1
+    assert {kw["repo"] for name, kw in redis.jobs if name == "reconcile_repo"} == {"widget"}
+
+
+@respx.mock
+async def test_fan_out_skips_when_nothing_configured() -> None:
+    _mock_settings("restrictedRepos:\n  - 'tmp-*'\n")  # no tier, no org, no overlay
     repos_route = _mock_repos(("widget", False))
     redis = _FakeArqRedis()
     ctx = {"client_factory": _FakeFactory(GitHub("token")), "redis": redis}
@@ -101,3 +115,19 @@ async def test_fan_out_skips_when_no_repository_block() -> None:
     assert count == 0
     assert redis.jobs == []
     assert not repos_route.called  # short-circuits before listing repos
+
+
+@respx.mock
+async def test_organization_block_enqueues_org_reconcile() -> None:
+    # An organization block enqueues a single reconcile_org (no repo fan-out needed here).
+    _mock_settings("organization:\n  billing_email: ops@acme.test\n")
+    repos_route = _mock_repos(("widget", False))
+    redis = _FakeArqRedis()
+    ctx = {"client_factory": _FakeFactory(GitHub("token")), "redis": redis}
+
+    count = await reconcile_installation(ctx, installation_id=42, owner="acme")
+
+    assert count == 0  # no repo-scoped tier declared
+    assert [name for name, _ in redis.jobs] == ["reconcile_org"]
+    assert redis.jobs[0][1] == {"installation_id": 42, "owner": "acme"}
+    assert not repos_route.called

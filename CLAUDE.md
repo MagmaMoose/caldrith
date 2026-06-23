@@ -6,12 +6,20 @@ config-as-code: install the App, create an **admin repo** with
 `.github/settings.yml`, and Caldrith **reconciles** repo settings to match —
 modelled on github/safe-settings.
 
-**P1 scope (narrow):** the `repository:` block (three fields end-to-end —
-`allow_auto_merge`, `delete_branch_on_merge`, `allow_update_branch`) **and**
-the `branches:` tier (declarative full-replace branch protection; `restrictions`
-and `required_signatures` deferred, schema-rejected). github.com, Organization
-**and** User accounts. Everything else (rulesets, labels, teams, suborgs, GHES,
-CEL policy) is **deferred** — leave clean seams, don't implement.
+**Scope (broad):** Caldrith reconciles a wide GitHub config surface. **Repo-scoped
+tiers** (registered in `runner.REPO_TIERS`, run per repo): `repository` (all
+`repos.update` fields), `repository.security`, `topics`, `branches` (full branch
+protection incl. `restrictions` + `required_signatures`), `rulesets`, `files`,
+`labels`, `milestones`, `collaborators`, `teams`, `autolinks`, `custom_properties`,
+`interaction_limits`, `actions`, `variables`, `secrets` (presence-only),
+`environments`, `pages`. **Org-scoped** (`run_org_reconcile` / the `reconcile_org`
+job, gated on Organization accounts): the `organization` block (`orgs.update` +
+actions + interaction limits + custom-property definitions + org rulesets).
+**Overlays:** `suborgs` (by repo glob) and per-repo `repos` overrides, merged base →
+suborgs → repos by `reconcile.overlay.resolve_for_repo`. github.com, Organization
+**and** User accounts. Reactive **drift events** self-heal a repo/org on out-of-band
+changes. Still **deferred** (clean seams, don't implement): GHES multi-registration
+and CEL policy.
 
 @.claude/QUICK_START.md
 @.claude/ARCHITECTURE_MAP.md

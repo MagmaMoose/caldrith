@@ -26,8 +26,9 @@ from typing import Any
 from githubkit import GitHub
 from githubkit.exception import RequestFailed
 
-from caldrith.config.schema import ManagedFile
+from caldrith.config.schema import ManagedFile, RepoScoped
 from caldrith.github_json import response_json
+from caldrith.reconcile.base import RepoTier, TierResult
 from caldrith.reconcile.planner import TargetRepo
 from caldrith.reconcile.selection import matches_any
 
@@ -202,3 +203,27 @@ class FileProvisioner:
         result.pr_url = await self._ensure_pr(target, default_branch)
         result.applied = True
         return result
+
+
+async def reconcile(
+    client: GitHub, target: TargetRepo, config: RepoScoped, *, dry_run: bool = False
+) -> list[TierResult]:
+    """Uniform adapter: provision managed files into one repo (via PR)."""
+    if not config.files:
+        return []
+    result = await FileProvisioner(client, dry_run=dry_run).apply(target, config.files)
+    notes = list(result.files)
+    if result.pr_url:
+        notes.append(f"PR: {result.pr_url}")
+    return [
+        TierResult(
+            tier="files",
+            scope=result.repo,
+            changed=result.changed,
+            applied=result.applied,
+            notes=notes,
+        )
+    ]
+
+
+TIER = RepoTier(name="files", configured=lambda c: bool(c.files), reconcile=reconcile)

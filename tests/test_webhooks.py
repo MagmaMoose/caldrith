@@ -203,3 +203,60 @@ def test_payload_without_installation_ignored(client: TestClient) -> None:
     assert resp.status_code == 202
     assert resp.json()["status"] == "ignored"
     assert client.fake_arq.jobs == []  # type: ignore[attr-defined]
+
+
+@pytest.mark.parametrize(
+    "event",
+    ["label", "milestone", "member", "branch_protection_rule", "public"],
+)
+def test_drift_event_reconciles_affected_repo(client: TestClient, event: str) -> None:
+    """An out-of-band change to a managed setting self-heals the affected repo."""
+    payload = {
+        "action": "edited",
+        "repository": {"name": "widget", "owner": {"login": "acme"}},
+        "installation": {"id": 42},
+    }
+    resp = _post(client, payload, event=event, delivery=f"drift-{event}")
+    assert resp.status_code == 202
+    name, kwargs = client.fake_arq.jobs[0]  # type: ignore[attr-defined]
+    assert name == "reconcile_repo"
+    assert kwargs["owner"] == "acme"
+    assert kwargs["repo"] == "widget"
+    assert kwargs["dry_run"] is False
+
+
+def test_repo_ruleset_drift_reconciles_repo(client: TestClient) -> None:
+    """A repo-scoped ruleset change re-reconciles that repository."""
+    payload = {
+        "action": "edited",
+        "repository": {"name": "widget", "owner": {"login": "acme"}},
+        "installation": {"id": 42},
+    }
+    resp = _post(client, payload, event="repository_ruleset", delivery="rs-repo")
+    assert resp.status_code == 202
+    name, kwargs = client.fake_arq.jobs[0]  # type: ignore[attr-defined]
+    assert name == "reconcile_repo" and kwargs["repo"] == "widget"
+
+
+def test_org_ruleset_drift_reconciles_org(client: TestClient) -> None:
+    """An org-scoped ruleset change (no repository) re-reconciles the organization."""
+    payload = {
+        "action": "edited",
+        "organization": {"login": "acme"},
+        "installation": {"id": 42},
+    }
+    resp = _post(client, payload, event="repository_ruleset", delivery="rs-org")
+    assert resp.status_code == 202
+    assert client.fake_arq.jobs == [  # type: ignore[attr-defined]
+        ("reconcile_org", {"installation_id": 42, "owner": "acme"})
+    ]
+
+
+def test_unknown_event_ignored(client: TestClient) -> None:
+    payload = {
+        "repository": {"name": "widget", "owner": {"login": "acme"}},
+        "installation": {"id": 7},
+    }
+    resp = _post(client, payload, event="star", delivery="star-1")
+    assert resp.status_code == 202
+    assert client.fake_arq.jobs == []  # type: ignore[attr-defined]

@@ -16,16 +16,19 @@ through the GitHub API.
     and **User** accounts on github.com today (GHES is on the roadmap), and
     reconciles **private, public, and internal** repos alike.
 
-## What it does (and the one thing, today)
+## What it does
 
 You describe the desired state once, in the admin repo, and Caldrith keeps every
 target repo in line with it.
 
-Caldrith is built in vertical slices. **Right now (P1) it enforces only the
-`repository:` block, and within it only three merge settings end-to-end:**
-`allow_auto_merge`, `delete_branch_on_merge`, and `allow_update_branch`. The
-config **schema** mirrors safe-settings, so other `repository:` fields parse and
-validate — they just are not applied yet. See [Configuration](configuration.md).
+Caldrith enforces a broad slice of the safe-settings surface: the full
+`repository:` block, branch protection, repository **and** organization rulesets,
+labels, milestones, collaborators, teams, autolinks, custom properties, interaction
+limits, Actions settings, variables, secrets (presence), environments, Pages,
+provisioned files (required workflows via PR), the `organization:` block, and
+suborg/per-repo overlays. The config **schema** mirrors safe-settings, so an
+existing safe-settings `settings.yml` is compatible. See
+[Configuration](configuration.md) for the full per-tier reference.
 
 ## How it reacts
 
@@ -34,14 +37,14 @@ validate — they just are not applied yet. See [Configuration](configuration.md
 | `push` | to the **admin repo's default branch** | Reconcile **all** target repos (one job per repo). |
 | `repository` | `created` / `edited` | Reconcile **that** repo. |
 | `pull_request` | settings change on a **non-default** branch | **Dry run** — post a Check Run with the diff. Mutates nothing. |
+| drift events | `label` / `milestone` / `member` / `branch_protection_rule` / `repository_ruleset` / `public` | **Self-heal** — re-reconcile the affected repo (or org). |
 
 Reconcile is **idempotent**: Caldrith diffs live settings against the desired
-state and `PATCH`es only on a real change.
+state and writes only on a real change.
 
 ## Next steps
 
-- [Configuration](configuration.md) — the `settings.yml` schema and the three P1
-  fields.
+- [Configuration](configuration.md) — the `settings.yml` schema, tier by tier.
 - [Architecture](architecture.md) — ingest → queue → worker, and the pure core.
 - [Self-hosting](self-hosting.md) — run the service and register the App.
 - [Security](security.md) — the admin-repo blast radius and how to lock it down.

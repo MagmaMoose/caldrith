@@ -119,3 +119,24 @@ async def test_empty_desired_is_noop() -> None:
         result = await applier.apply(TargetRepo("acme", "widget"), RepositorySettings())
     assert result.applied is False
     assert result.has_changes is False
+
+
+@respx.mock
+async def test_topics_not_sent_through_repos_update() -> None:
+    # topics has its own tier/endpoint; a repository block with ONLY topics must not PATCH.
+    get = respx.get("https://api.github.com/repos/acme/widget").mock(
+        return_value=httpx.Response(200, json=_repo_json())
+    )
+    patch = respx.patch("https://api.github.com/repos/acme/widget").mock(
+        return_value=httpx.Response(200, json=_repo_json())
+    )
+
+    async with GitHub("token") as client:
+        result = await RepositoryApplier(client).apply(
+            TargetRepo("acme", "widget"),
+            RepositorySettings(topics=["a", "b"]),
+        )
+
+    assert not patch.called  # topics is dropped from the repos.update body
+    assert not get.called  # short-circuits before any API call (no patchable fields)
+    assert result.has_changes is False
