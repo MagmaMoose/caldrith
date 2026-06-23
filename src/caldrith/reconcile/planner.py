@@ -25,6 +25,7 @@ class TargetRepo:
 
     owner: str
     name: str
+    visibility: str | None = None  # public | private | internal — used by visibility overlays
 
     @property
     def full_name(self) -> str:
@@ -63,7 +64,16 @@ async def list_target_repos(client: GitHub) -> list[TargetRepo]:
             # Archived repos reject settings PATCHes (403/422); never target them.
             if repo.get("archived"):
                 continue
-            targets.append(TargetRepo(owner=repo["owner"]["login"], name=repo["name"]))
+            targets.append(
+                TargetRepo(
+                    owner=repo["owner"]["login"],
+                    name=repo["name"],
+                    # `visibility` distinguishes internal from private; fall back to the
+                    # `private` bool when the field is absent.
+                    visibility=repo.get("visibility")
+                    or ("private" if repo.get("private") else "public"),
+                )
+            )
         if len(repositories) < per_page:
             break
         page += 1

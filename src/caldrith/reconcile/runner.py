@@ -201,7 +201,11 @@ async def run_reconcile(
     for target in targets:
         # Resolve overlays (suborgs / per-repo overrides) to the effective config for
         # THIS repo; without overlays every repo shares the base config unchanged.
-        effective = resolve_for_repo(settings_config, target.name) if overlays else settings_config
+        effective = (
+            resolve_for_repo(settings_config, target.name, target.visibility)
+            if overlays
+            else settings_config
+        )
         for tier in REPO_TIERS:
             if not tier.configured(effective):
                 continue

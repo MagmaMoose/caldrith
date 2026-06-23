@@ -21,3 +21,7 @@ build/
 
 # Claude Code (scratch flood-output target from the [tooling] block)
 .claude/last_output.txt
+
+# IDEs / editors
+.idea/
+.vscode/

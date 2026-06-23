@@ -1142,7 +1142,8 @@ the drifted ones are written.
 The top-level block is the org-wide **base**. Two overlay layers refine it:
 
 - **`suborgs`** — repo-scoped settings applied to a subset of repos, membership by
-  name glob (`repos`). `name` is a label for logs/diagnostics.
+  name glob (`repos`) **and/or repo `visibility`** (`public` / `private` / `internal`).
+  `name` is a label for logs/diagnostics.
 - **`repos`** — per-repo overrides, matched by `name` (an exact name or a glob).
 
 For a given repo the effective config is the base with each matching overlay merged
@@ -1176,6 +1177,38 @@ repos:
     tier** (`labels`, `branches`, `variables`, …) is **replaced wholesale** when
     an overlay declares it: a list is an all-or-nothing statement.
 
+### Scope by visibility — paid features on public repos only
+
+GitHub Advanced Security, secret scanning, code scanning, **Code Quality** and **code
+coverage** are free on public repos but paid (per active committer) on private/internal
+ones. A `visibility`-scoped suborg applies a slice of settings to just one visibility
+class, so you can turn these on
+everywhere they're free without ever enabling (and being billed for) them on private
+repos:
+
+```yaml
+suborgs:
+  - name: public-security
+    visibility: [public]                 # only public repos get the block below
+    repository:
+      security_and_analysis:             # GHAS / secret scanning / code scanning
+        advanced_security: { status: enabled }
+        secret_scanning: { status: enabled }
+        secret_scanning_push_protection: { status: enabled }
+    rulesets:
+      - name: Quality gate
+        target: branch
+        enforcement: active
+        conditions: { ref_name: { include: ["~DEFAULT_BRANCH"], exclude: [] } }
+        rules:
+          - type: code_quality           # + a code-coverage rule once Code Quality is enabled
+```
+
+Keep these out of the org-wide **base** — only the `visibility: [public]` suborg should
+carry them, so private/internal repos never receive them. A repo whose visibility caldrith
+can't determine is treated as **not** matching (safer to skip a paid feature than to apply
+it), and `visibility` combines with `repos` by **AND** when both are set.
+
 **Fields** — `suborgs[]` and `repos[]` carry the structural keys below **plus every
 repository-scoped tier** (`repository`, `branches`, `rulesets`, `files`, `labels`,
 `milestones`, `collaborators`, `teams`, `autolinks`, `custom_properties`,
@@ -1186,6 +1219,7 @@ documented in its own section above).
 | --- | --- | --- |
 | `suborgs[].name` | required | Label for logs/diagnostics identifying this sub-org overlay. |
 | `suborgs[].repos` | — | Repo-name globs defining which repos this overlay applies to. |
+| `suborgs[].visibility` | — | Match repos by visibility — any of `public` / `private` / `internal`. With `repos` set, a repo must match both. |
 | `repos[].name` | required | Repo name or glob this per-repo override matches. |
 
 ## The generated JSON Schema

@@ -9,11 +9,12 @@ from githubkit import GitHub
 from caldrith.reconcile.planner import TargetRepo, account_type, list_target_repos
 
 
-def _repo(owner: str, name: str) -> dict:
+def _repo(owner: str, name: str, visibility: str = "public") -> dict:
     return {
         "id": hash(name) % 100000,
         "name": name,
         "owner": {"login": owner, "id": 1},
+        "visibility": visibility,
     }
 
 
@@ -33,8 +34,8 @@ async def test_list_target_repos_single_page() -> None:
         targets = await list_target_repos(client)
 
     assert targets == [
-        TargetRepo(owner="acme", name="widget"),
-        TargetRepo(owner="acme", name="gadget"),
+        TargetRepo(owner="acme", name="widget", visibility="public"),
+        TargetRepo(owner="acme", name="gadget", visibility="public"),
     ]
 
 
@@ -58,7 +59,7 @@ async def test_list_target_repos_paginates() -> None:
         targets = await list_target_repos(client)
 
     assert len(targets) == 101
-    assert targets[-1] == TargetRepo(owner="acme", name="last")
+    assert targets[-1] == TargetRepo(owner="acme", name="last", visibility="public")
 
 
 @respx.mock
@@ -80,7 +81,46 @@ async def test_list_target_repos_skips_archived() -> None:
     async with GitHub("token") as client:
         targets = await list_target_repos(client)
 
-    assert targets == [TargetRepo("acme", "active"), TargetRepo("acme", "fresh")]
+    assert targets == [
+        TargetRepo("acme", "active", visibility="public"),
+        TargetRepo("acme", "fresh", visibility="public"),
+    ]
+
+
+@respx.mock
+async def test_list_target_repos_carries_visibility() -> None:
+    # visibility drives visibility-scoped overlays; the `private` bool is the fallback
+    # when the `visibility` field is absent from the payload.
+    respx.get("https://api.github.com/installation/repositories").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "total_count": 4,
+                "repositories": [
+                    _repo("acme", "pub", visibility="public"),
+                    _repo("acme", "priv", visibility="private"),
+                    _repo("acme", "int", visibility="internal"),
+                    # no `visibility` field, only the private bool -> falls back to "private"
+                    {
+                        "id": 9,
+                        "name": "legacy",
+                        "owner": {"login": "acme", "id": 1},
+                        "private": True,
+                    },
+                ],
+            },
+        )
+    )
+
+    async with GitHub("token") as client:
+        targets = await list_target_repos(client)
+
+    assert {t.name: t.visibility for t in targets} == {
+        "pub": "public",
+        "priv": "private",
+        "int": "internal",
+        "legacy": "private",
+    }
 
 
 @respx.mock

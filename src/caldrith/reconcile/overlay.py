@@ -1,9 +1,10 @@
 """Resolve the effective per-repo config from base + suborg + repo overlays.
 
 ``settings.yml`` may layer settings: the top-level block is the org-wide base, ``suborgs``
-overlays apply to repo subsets (by name glob), and ``repos`` overlays target individual
-repos. For a given repo the effective config is the base with each matching overlay
-merged on top, last-wins, in order: base -> suborgs (declared order) -> repos.
+overlays apply to repo subsets (by name glob and/or repo ``visibility``), and ``repos``
+overlays target individual repos. For a given repo the effective config is the base with
+each matching overlay merged on top, last-wins, in order: base -> suborgs (declared order)
+-> repos.
 
 Merge rules (mirroring github/safe-settings):
 - The ``repository`` block is **field-merged** (an overlay overrides only the fields it
@@ -26,6 +27,7 @@ from caldrith.config.schema import (
     RepoScoped,
     RepositorySettings,
     SafeSettingsConfig,
+    SubOrg,
 )
 
 _GLOB_FLAGS = _fnmatch.EXTMATCH | _fnmatch.BRACE
@@ -35,6 +37,23 @@ _REPO_SCOPED_FIELDS = tuple(RepoScoped.model_fields)
 def _matches(name: str, patterns: list[str] | None) -> bool:
     pats = list(patterns or [])
     return bool(pats) and _fnmatch.fnmatch(name, pats, flags=_GLOB_FLAGS)
+
+
+def _suborg_matches(suborg: SubOrg, repo_name: str, visibility: str | None) -> bool:
+    """Whether ``suborg`` applies to this repo.
+
+    Each selector the suborg sets must match: ``repos`` (name globs) and/or
+    ``visibility``. A suborg with neither selector matches nothing. A ``visibility``
+    filter never matches a repo whose visibility is unknown (``None``) — safer to skip
+    than to apply (e.g. a paid feature) to a repo we couldn't classify.
+    """
+    if not suborg.repos and not suborg.visibility:
+        return False  # no selector -> matches nothing
+    repos_ok = not suborg.repos or _matches(repo_name, suborg.repos)
+    visibility_ok = not suborg.visibility or (
+        visibility is not None and visibility in suborg.visibility
+    )
+    return repos_ok and visibility_ok
 
 
 def _merge_repository(
@@ -50,16 +69,19 @@ def _merge_repository(
     return RepositorySettings(**data)
 
 
-def resolve_for_repo(config: SafeSettingsConfig, repo_name: str) -> SafeSettingsConfig:
+def resolve_for_repo(
+    config: SafeSettingsConfig, repo_name: str, visibility: str | None = None
+) -> SafeSettingsConfig:
     """Return the effective repo-scoped config for ``repo_name`` after overlays.
 
     Overlays are applied base -> matching suborgs (in order) -> matching repo overrides
-    (in order). When no overlays match, this is equivalent to the base config's
-    repo-scoped tiers.
+    (in order). Suborgs match by name glob and/or ``visibility`` (pass the repo's
+    visibility so visibility-scoped overlays resolve). When no overlays match, this is
+    equivalent to the base config's repo-scoped tiers.
     """
     layers: list[RepoScoped] = [config]
     for suborg in config.suborgs or []:
-        if _matches(repo_name, suborg.repos):
+        if _suborg_matches(suborg, repo_name, visibility):
             layers.append(suborg)
     for override in config.repos or []:
         if _matches(repo_name, [override.name]):

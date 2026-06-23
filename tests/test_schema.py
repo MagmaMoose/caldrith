@@ -10,8 +10,17 @@ from caldrith.config.schema import (
     RepositorySettings,
     RestrictedRepos,
     SafeSettingsConfig,
+    SubOrg,
     config_json_schema,
 )
+
+
+def test_suborg_visibility_parses_and_validates() -> None:
+    SubOrg(name="public-only", visibility=["public"])  # ok
+    SubOrg(name="restricted", visibility=["private", "internal"])  # ok
+    SubOrg(name="by-name", repos=["svc-*"])  # visibility optional
+    with pytest.raises(ValidationError):
+        SubOrg(name="typo", visibility=["pubic"])  # unknown visibility rejected
 
 
 def test_three_required_fields_parse() -> None:

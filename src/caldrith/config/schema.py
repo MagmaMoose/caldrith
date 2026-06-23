@@ -559,14 +559,30 @@ class OrganizationSettings(BaseModel):
 class SubOrg(RepoScoped):
     """A sub-organization overlay: repo-scoped settings applied to a subset of repos.
 
-    Membership is by ``repos`` (name globs). ``name`` is a label for logs/diagnostics.
-    Overlay layers are applied base -> suborg -> repo override (last wins).
+    Membership is by ``repos`` (name globs) and/or ``visibility`` (``public`` /
+    ``private`` / ``internal``). Set either or both; when both are set a repo must match
+    both, and a suborg with neither matches nothing. A ``visibility``-only suborg is the
+    clean way to apply settings to one visibility class — e.g. enabling GitHub Advanced
+    Security / secret scanning / Code Quality on **public repos only** (free there, paid
+    per-committer on private/internal). ``name`` is a label for logs/diagnostics. Overlay
+    layers are applied base -> suborg -> repo override (last wins).
     """
 
     model_config = ConfigDict(extra="forbid")
 
     name: str
     repos: list[str] | None = None  # repo-name globs that belong to this suborg
+    visibility: list[str] | None = None  # match by repo visibility: public | private | internal
+
+    @model_validator(mode="after")
+    def _check_visibility(self) -> SubOrg:
+        allowed = {"public", "private", "internal"}
+        bad = [v for v in (self.visibility or []) if v not in allowed]
+        if bad:
+            raise ValueError(
+                f"suborg visibility entries must be one of {sorted(allowed)}; got {bad}"
+            )
+        return self
 
 
 class RepoOverride(RepoScoped):
