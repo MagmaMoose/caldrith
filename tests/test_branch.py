@@ -327,6 +327,33 @@ async def test_required_signatures_enabled_via_dedicated_endpoint() -> None:
 
 
 @respx.mock
+async def test_required_signatures_only_on_unprotected_branch() -> None:
+    """Regression: signatures-only on an unprotected branch must PUT protection first.
+
+    Commit-signature protection attaches to existing branch protection. When signatures
+    is the ONLY declared protection and the branch is currently unprotected, the canonical
+    desired equals the all-off actual (``changed`` is False) — so without first PUTting a
+    (possibly all-off) protection, the signature POST 404s on an unprotected branch and the
+    declared security control is silently never enforced.
+    """
+    respx.get(_REPO).mock(return_value=httpx.Response(200, json=_repo()))
+    respx.get(_PROT).mock(return_value=_not_protected())  # branch has no protection yet
+    put = respx.put(_PROT).mock(return_value=httpx.Response(200, json=_live()))
+    create_sig = respx.post(_SIG).mock(return_value=httpx.Response(200, json=_sig(True).json()))
+
+    cfg = BranchConfig(name="main", protection=BranchProtection(required_signatures=True))
+    async with GitHub("token") as client:
+        result = await BranchProtectionApplier(client).apply(TargetRepo("acme", "widget"), cfg)
+
+    assert put.called  # an all-off protection is established so the signature POST can attach
+    body = json.loads(put.calls.last.request.content)
+    assert body["enforce_admins"] is False
+    assert body["required_pull_request_reviews"] is None
+    assert create_sig.called  # signatures actually enabled, not silently dropped
+    assert result.changed is True and result.applied is True
+
+
+@respx.mock
 async def test_contexts_sort_is_idempotent() -> None:
     """Live contexts in a different order from desired must not cause spurious drift."""
     respx.get(_REPO).mock(return_value=httpx.Response(200, json=_repo()))

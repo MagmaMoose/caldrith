@@ -245,7 +245,10 @@ class BranchProtectionApplier:
                 body if changed else None,
             )
 
-        if changed:
+        # Commit-signature protection attaches to existing branch protection, so PUT a
+        # (possibly all-off) protection first when the branch isn't protected yet —
+        # otherwise enabling signatures alone 404s on an unprotected branch.
+        if changed or (desired_sig and actual is None):
             await self._client.rest.repos.async_update_branch_protection(
                 owner=target.owner,
                 repo=target.name,
