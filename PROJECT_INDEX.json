@@ -1,9 +1,9 @@
 {
-  "generated": "2026-06-19T00:00:00Z",
-  "summary": "Caldrith is a multi-tenant GitHub App (FastAPI ingest + an ARQ/Redis worker, NOT a CLI or Marketplace Action) that enforces GitHub configuration-as-code modelled on github/safe-settings: install the App, create an admin repo with .github/settings.yml, and Caldrith reconciles repository settings to match. The HTTP ingest path is thin (verify raw-body HMAC -> dedup on X-GitHub-Delivery -> enqueue ARQ job -> 202); heavy reconcile runs in the worker, fanning out one job per repo for full-account syncs. `config/` (schema + loader + diff) is the pure, I/O-free core. P1 enforces ONLY the repository: block's three merge fields (allow_auto_merge, delete_branch_on_merge, allow_update_branch) end-to-end, on github.com Organization AND User accounts.",
+  "generated": "2026-06-23T00:00:00Z",
+  "summary": "Caldrith is a multi-tenant GitHub App (FastAPI ingest + an ARQ/Redis worker, NOT a CLI or Marketplace Action) that enforces GitHub configuration-as-code modelled on github/safe-settings: install the App, create an admin repo with .github/settings.yml, and Caldrith reconciles GitHub settings to match. The HTTP ingest path is thin (verify raw-body HMAC -> dedup on X-GitHub-Delivery -> enqueue ARQ job -> 202); heavy reconcile runs in the worker, fanning out one job per repo (plus one reconcile_org job for Organization accounts). `config/` (schema + loader + diff) is the pure, I/O-free core. Reconcile uses a TIER REGISTRY: runner.REPO_TIERS lists per-repo tier modules (repository, security, topics, labels, milestones, collaborators, teams, autolinks, custom_properties, interaction_limits, actions, variables, secrets, environments, pages, rulesets, files, branches), each exposing a reconcile() adapter returning TierResult rows; org-scoped settings (organization block) run via run_org_reconcile; suborgs/repos overlays resolve per-repo via reconcile.overlay. Reactive drift webhooks self-heal a repo/org on out-of-band changes. github.com Organization AND User accounts.",
   "entrypoints": [
     "src/caldrith/api/app.py:create_app (FastAPI factory; uvicorn --factory)",
-    "src/caldrith/worker/worker.py:WorkerSettings (arq worker)",
+    "src/caldrith/worker/worker.py:WorkerSettings (arq worker; jobs reconcile_installation / reconcile_repo / reconcile_org)",
     "POST / (webhook ingest)",
     "GET /healthz (liveness), GET /readyz (Redis readiness)"
   ],
@@ -28,7 +28,7 @@
     },
     "api.webhooks": {
       "path": "src/caldrith/api/webhooks.py",
-      "purpose": "POST /: read RAW body -> verify signature -> dedup on X-GitHub-Delivery -> enqueue ARQ job -> return 202. Routes push/repository/pull_request to the right job. THIN — no reconcile here.",
+      "purpose": "POST /: read RAW body -> verify signature -> dedup on X-GitHub-Delivery -> enqueue ARQ job -> return 202. Routes push/repository/pull_request plus reactive drift events (label/milestone/member/branch_protection_rule/repository_ruleset/public) that self-heal the affected repo (or org). THIN — no reconcile here.",
       "exports": ["router"],
       "depends_on": ["api.security", "worker.queue", "settings", "audit.logging"]
     },
@@ -52,8 +52,8 @@
     },
     "config.schema": {
       "path": "src/caldrith/config/schema.py",
-      "purpose": "PURE. RepositorySettings (the 3 required P1 fields + common optional safe-settings fields) and SafeSettingsConfig(repository: RepositorySettings | None, ...stub deferred tiers). model_json_schema() usable for docs.",
-      "exports": ["RepositorySettings", "SafeSettingsConfig"],
+      "purpose": "PURE. All tier models. RepoScoped holds every repo-scoped tier (repository, branches, rulesets, files, labels, milestones, collaborators, teams, autolinks, custom_properties, interaction_limits, actions, variables, secrets, environments, pages); SafeSettingsConfig(RepoScoped) adds restrictedRepos + organization + suborgs + repos overlays. RepositorySettings = all repos.update fields (+ topics/security routed to dedicated tiers). BranchProtection now includes restrictions + required_signatures. OrganizationSettings = orgs.update fields + actions/interaction_limits/custom_property_definitions/rulesets. config_json_schema() for docs.",
+      "exports": ["RepoScoped", "SafeSettingsConfig", "RepositorySettings", "OrganizationSettings", "Label", "Milestone", "Collaborator", "TeamAccess", "Autolink", "Variable", "SecretsConfig", "Environment", "PagesConfig", "ActionsSettings", "InteractionLimits", "BranchProtection", "BranchRestrictions", "Ruleset", "ManagedFile", "SubOrg", "RepoOverride"],
       "depends_on": []
     },
     "config.loader": {
@@ -80,22 +80,46 @@
       "exports": ["RepositoryApplier", "ApplyResult", "NopResult"],
       "depends_on": ["config.diff", "config.schema", "auth.client"]
     },
+    "reconcile.base": {
+      "path": "src/caldrith/reconcile/base.py",
+      "purpose": "Uniform tier protocol. TierResult(tier, scope, changed, applied, notes) and RepoTier(name, configured, reconcile) — the registry entry every repo-scoped tier exposes as a module-level TIER.",
+      "exports": ["TierResult", "RepoTier"],
+      "depends_on": ["config.schema", "reconcile.planner"]
+    },
+    "reconcile.overlay": {
+      "path": "src/caldrith/reconcile/overlay.py",
+      "purpose": "PURE overlay resolution. resolve_for_repo(config, repo_name) merges base -> matching suborgs (by repo glob) -> matching repos overrides (last wins; repository field-merges, other tiers replace) into the effective per-repo SafeSettingsConfig. has_overlays(config).",
+      "exports": ["resolve_for_repo", "has_overlays"],
+      "depends_on": ["config.schema"]
+    },
     "reconcile.runner": {
       "path": "src/caldrith/reconcile/runner.py",
-      "purpose": "run_reconcile(installation_id, owner, repos=None, dry_run=False, head_sha=None): orchestrate load_admin_config -> plan -> apply/nop. In dry_run, post a GitHub Check Run summarising the diff and mutate nothing.",
-      "exports": ["run_reconcile"],
-      "depends_on": ["config.loader", "reconcile.planner", "reconcile.repository", "auth.client", "audit.logging"]
+      "purpose": "run_reconcile(client, installation_id, owner, repos=None, dry_run=False, head_sha=None): load admin config, resolve overlays per repo, run every configured REPO_TIERS tier per target, aggregate TierResult. In dry_run post a GitHub Check Run grouping changes by tier. REPO_TIERS is the per-repo tier registry. Re-exports run_org_reconcile.",
+      "exports": ["run_reconcile", "ReconcileSummary", "REPO_TIERS", "run_org_reconcile"],
+      "depends_on": ["config.loader", "reconcile.base", "reconcile.overlay", "reconcile.planner", "reconcile.selection", "reconcile.org", "auth.client", "audit.logging"]
+    },
+    "reconcile.org": {
+      "path": "src/caldrith/reconcile/org.py",
+      "purpose": "run_org_reconcile(client, installation_id, owner, dry_run=False): reconcile the organization block once per account (gated on account_type==Organization). Sub-reconcilers: orgs.update settings (generic diff), org actions, org interaction limits, org custom-property definitions, org rulesets (reuses ruleset._to_body/_has_drift).",
+      "exports": ["run_org_reconcile", "OrgSummary"],
+      "depends_on": ["config.loader", "config.diff", "config.schema", "reconcile.base", "reconcile.planner", "reconcile.ruleset", "auth.client", "audit.logging"]
+    },
+    "reconcile.tiers": {
+      "path": "src/caldrith/reconcile/{topics,labels,milestones,collaborators,teams,autolinks,custom_properties,interactions,actions,variables,secrets,environments,pages,branch,ruleset,files,security,repository}.py",
+      "purpose": "One module per repo-scoped tier. Each exposes `async def reconcile(client, target, config, *, dry_run) -> list[TierResult]` and a module-level `TIER = RepoTier(...)`. Full-replace+prune: labels, collaborators (direct), teams (org-only), autolinks, variables (and secrets when prune:true). Create/update-only: milestones, environments, rulesets. Dedicated endpoints (not repos.update): topics, security, interactions, actions, pages, variables, secrets, custom_properties. secrets manages PRESENCE only (values from CALDRITH_SECRET_<NAME>, PyNaCl sealed-box, never rotated).",
+      "exports": ["reconcile", "TIER"],
+      "depends_on": ["config.schema", "reconcile.base", "reconcile.planner", "github_json"]
     },
     "worker.worker": {
       "path": "src/caldrith/worker/worker.py",
-      "purpose": "ARQ WorkerSettings + job funcs reconcile_installation and reconcile_repo; Redis settings derived from REDIS_URL.",
-      "exports": ["WorkerSettings", "reconcile_installation", "reconcile_repo"],
-      "depends_on": ["reconcile.runner", "settings", "audit.logging"]
+      "purpose": "ARQ WorkerSettings + jobs reconcile_installation (fan out one reconcile_repo per managed repo when any repo tier/overlay is configured, plus one reconcile_org when an organization block is present), reconcile_repo, reconcile_org. Redis settings from REDIS_URL.",
+      "exports": ["WorkerSettings", "reconcile_installation", "reconcile_repo", "reconcile_org"],
+      "depends_on": ["reconcile.runner", "reconcile.org", "reconcile.overlay", "settings", "audit.logging"]
     },
     "worker.queue": {
       "path": "src/caldrith/worker/queue.py",
-      "purpose": "Enqueue helpers + dedup_delivery(redis, delivery_id) using Redis SETNX with a TTL to drop duplicate webhook deliveries.",
-      "exports": ["enqueue_reconcile_installation", "enqueue_reconcile_repo", "dedup_delivery"],
+      "purpose": "Enqueue helpers (reconcile_installation / reconcile_repo / reconcile_org) + dedup_delivery(redis, delivery_id) using Redis SETNX with a TTL to drop duplicate webhook deliveries.",
+      "exports": ["enqueue_reconcile_installation", "enqueue_reconcile_repo", "enqueue_reconcile_org", "dedup_delivery"],
       "depends_on": ["settings"]
     },
     "audit.logging": {
@@ -105,5 +129,5 @@
       "depends_on": []
     }
   },
-  "note_for_agents": "Load this file on demand to locate code; it is NOT auto-imported into CLAUDE.md. Design rule: config/ (schema + loader + diff) stays pure — no githubkit, ARQ, FastAPI, or network imports — so the schema and diff are unit-tested with synthetic dicts. Ingest contract: POST / verifies the HMAC over the RAW body BEFORE any parse, dedups on X-GitHub-Delivery, enqueues, and returns 202 — no reconcile in the request. Build a NEW githubkit client per installation (AppInstallationAuthStrategy); never share tokens; base_url is configurable for the GHES future. P1 reconciles ONLY repository.{allow_auto_merge, delete_branch_on_merge, allow_update_branch}; PR events are dry-run (Check Run) only. Deferred (clean seams, not implemented): branch protection, rulesets, labels, teams, collaborators, environments, custom properties, suborg/repo overlay tiers, GHES multi-registration, CEL policy. Tests mirror modules 1:1 under tests/."
+  "note_for_agents": "Load this file on demand to locate code; it is NOT auto-imported into CLAUDE.md. Design rule: config/ (schema + loader + diff + overlay logic in reconcile/overlay) stays pure — no githubkit, ARQ, FastAPI, or network imports — so schema/diff/overlay are unit-tested with synthetic dicts. Ingest contract: POST / verifies the HMAC over the RAW body BEFORE any parse, dedups on X-GitHub-Delivery, enqueues, and returns 202 — no reconcile in the request. Build a NEW githubkit client per installation (AppInstallationAuthStrategy); never share tokens; base_url is configurable for the GHES future. ADD A TIER = a module with reconcile()+TIER registered in runner.REPO_TIERS (don't grow runner branches); configured() is evaluated on the resolved (overlay-merged) per-repo config. Full-replace tiers PRUNE undeclared items (labels/collaborators/teams/autolinks/variables; secrets only when prune:true); milestones/environments/rulesets never prune. secrets manages PRESENCE only (write-only values). Org settings run via run_org_reconcile (reconcile_org job), gated on Organization accounts. PR events are dry-run (Check Run) only; drift events self-heal idempotently. Still deferred (clean seams): GHES multi-registration, CEL policy. Tests mirror modules 1:1 under tests/."
 }

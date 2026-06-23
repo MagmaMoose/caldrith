@@ -20,22 +20,22 @@ declared configuration through the GitHub API.
 > github.com today (GHES is on the roadmap), and reconciles **private, public, and
 > internal** repos alike.
 
-## What it does (and the one thing, today)
+## What it does
 
 You describe the desired state once, in the admin repo, and Caldrith keeps every
-target repo in line with it — reacting to pushes, repo creation/edits, and PRs.
+target repo in line with it — reacting to pushes, repo creation/edits, PRs, and
+out-of-band drift.
 
-Caldrith is being built in vertical slices. **Right now (P1) it enforces only the
-`repository:` block, and within it only three merge settings end-to-end:**
-
-- `allow_auto_merge`
-- `delete_branch_on_merge`
-- `allow_update_branch`
-
-The config **schema** mirrors safe-settings, so additional `repository:` fields
-(and the deferred tiers below) parse and validate — they just are not applied yet.
-This keeps your existing safe-settings `settings.yml` compatible as the surface
-grows.
+Caldrith enforces a broad slice of the safe-settings surface: the full
+`repository:` block (all `repos.update` fields, topics, security toggles), branch
+protection (including push `restrictions` and `required_signatures`), repository and
+organization **rulesets**, **labels**, **milestones**, **collaborators**, **teams**,
+**autolinks**, **custom properties**, **interaction limits**, **Actions** settings,
+**variables**, **secrets** (presence), **environments**, **Pages**, **provisioned
+files** (required workflows via PR), the **`organization:`** block, and
+**suborg/per-repo overlays**. The config **schema** mirrors safe-settings, so an
+existing safe-settings `settings.yml` is compatible. See
+[`docs/configuration.md`](docs/configuration.md) for the full per-tier reference.
 
 ## Quickstart
 
@@ -73,11 +73,13 @@ inside GitHub's 10-second timeout. The heavy reconcile runs in an async
 | `push` | to the **admin repo's default branch** | Reconcile **all** target repos in the installation (fan out one job per repo). |
 | `repository` | `created` / `edited` | Reconcile **that** repo. |
 | `pull_request` | `opened` / `reopened` / `synchronize` touching the admin repo's `settings.yml` on a **non-default** branch | **Dry run.** Post a GitHub **Check Run** with the diff. **Mutates nothing.** |
+| drift events | `label` / `milestone` / `member` / `branch_protection_rule` / `repository_ruleset` / `public` | **Self-heal.** Re-reconcile the affected repo (or org) back to the declared state. |
 
-**Reconcile is idempotent.** Caldrith reads the live repo settings, computes a
-deep diff against the desired state (ignoring `url`-bearing keys plus `id` /
-`node_id`), and issues a `PATCH` **only when there is a real change**. Applying the
-same config twice yields exactly one mutation.
+**Reconcile is idempotent.** Caldrith reads the live state, computes a deep diff
+against the desired state (ignoring `url`-bearing keys plus `id` / `node_id`), and
+writes **only when there is a real change**. Applying the same config twice yields
+exactly one mutation, and a self-healing convergence that finds no drift issues no
+write — so drift events do not loop.
 
 **Per-installation isolation.** Every job builds a **fresh** client authenticated
 as that installation; tokens are never shared across installations. The GitHub API
@@ -86,10 +88,8 @@ in later without code changes.
 
 ## Deferred (clearly seamed, not yet implemented)
 
-Branch protection, rulesets, labels, teams, collaborators, environments, custom
-properties, suborg/repo overlay tiers (beyond a stub), GHES multi-registration,
-and a CEL policy layer are **out of scope for P1**. The schema and module layout
-leave clean seams for each so they slot in without rework.
+GHES multi-registration and a CEL policy layer are still out of scope. The schema
+and module layout leave clean seams for each so they slot in without rework.
 
 ## Conventions
 

@@ -41,8 +41,8 @@ def test_unknown_repository_key_rejected() -> None:
         RepositorySettings.model_validate({"not_a_real_field": True})
 
 
-def test_deferred_tiers_accepted_but_unused() -> None:
-    # A config exercising deferred seams must still validate.
+def test_many_tiers_parse_into_typed_models() -> None:
+    # A config exercising several tiers validates into typed models.
     cfg = SafeSettingsConfig.model_validate(
         {
             "repository": {"allow_auto_merge": True},
@@ -52,7 +52,9 @@ def test_deferred_tiers_accepted_but_unused() -> None:
         }
     )
     assert cfg.repository is not None
-    assert cfg.labels == [{"name": "bug", "color": "ff0000"}]
+    assert cfg.labels is not None
+    assert cfg.labels[0].name == "bug"
+    assert cfg.labels[0].color == "ff0000"
 
 
 def test_empty_config_valid() -> None:
@@ -137,11 +139,37 @@ def test_branches_protection_parses() -> None:
 
 
 def test_unknown_protection_key_rejected() -> None:
-    # restrictions/required_signatures are deferred — typos and unsupported keys fail loudly.
+    # Typos and genuinely unsupported keys fail loudly (extra="forbid").
     with pytest.raises(ValidationError):
         SafeSettingsConfig.model_validate(
-            {"branches": [{"name": "main", "protection": {"restrictions": {}}}]}
+            {"branches": [{"name": "main", "protection": {"not_a_real_field": True}}]}
         )
+
+
+def test_restrictions_and_signatures_parse() -> None:
+    # restrictions + required_signatures are now first-class protection fields.
+    cfg = SafeSettingsConfig.model_validate(
+        {
+            "branches": [
+                {
+                    "name": "main",
+                    "protection": {
+                        "required_signatures": True,
+                        "lock_branch": True,
+                        "restrictions": {"users": ["octocat"], "teams": ["core"]},
+                    },
+                }
+            ]
+        }
+    )
+    assert cfg.branches is not None
+    protection = cfg.branches[0].protection
+    assert protection is not None
+    assert protection.required_signatures is True
+    assert protection.lock_branch is True
+    assert protection.restrictions is not None
+    assert protection.restrictions.users == ["octocat"]
+    assert protection.restrictions.apps == []  # default empty
 
 
 def test_empty_required_pull_request_reviews_rejected() -> None:

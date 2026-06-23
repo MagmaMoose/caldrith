@@ -19,8 +19,9 @@ from dataclasses import dataclass
 from githubkit import GitHub
 
 from caldrith.config.diff import Diff, compare_deep
-from caldrith.config.schema import RepositorySettings
+from caldrith.config.schema import RepoScoped, RepositorySettings
 from caldrith.github_json import response_json
+from caldrith.reconcile.base import RepoTier, TierResult
 from caldrith.reconcile.planner import TargetRepo
 
 
@@ -52,9 +53,11 @@ class RepositoryApplier:
         """
         # Only consider fields the admin config explicitly set.
         desired_dict = desired.model_dump(exclude_unset=True, exclude_none=True)
-        # `security` is reconciled via dedicated endpoints (reconcile.security), not
-        # repos.update — drop it from the PATCH body.
+        # `security` and `topics` are reconciled via dedicated endpoints/tiers
+        # (reconcile.security / reconcile.topics), not repos.update — drop them from
+        # the PATCH body so they never reach `repos.async_update`.
         desired_dict.pop("security", None)
+        desired_dict.pop("topics", None)
         if not desired_dict:
             return ApplyResult(repo=target.full_name, diff=Diff(), applied=False)
 
@@ -77,3 +80,41 @@ class RepositoryApplier:
             **diff.changed_payload(),
         )
         return ApplyResult(repo=target.full_name, diff=diff, applied=True)
+
+
+def _patchable_fields(repository: RepositorySettings) -> dict[str, object]:
+    """The set repository fields that the ``repos.update`` PATCH would act on.
+
+    Excludes ``security`` and ``topics``, which have dedicated tiers/endpoints.
+    """
+    desired = repository.model_dump(exclude_unset=True, exclude_none=True)
+    desired.pop("security", None)
+    desired.pop("topics", None)
+    return desired
+
+
+def _configured(config: RepoScoped) -> bool:
+    """True when the repository block declares at least one ``repos.update`` field."""
+    return config.repository is not None and bool(_patchable_fields(config.repository))
+
+
+async def reconcile(
+    client: GitHub, target: TargetRepo, config: RepoScoped, *, dry_run: bool = False
+) -> list[TierResult]:
+    """Uniform adapter: reconcile the repository block for one repo."""
+    if config.repository is None:
+        return []
+    result = await RepositoryApplier(client, dry_run=dry_run).apply(target, config.repository)
+    notes = [f"{k} -> {v!r}" for k, v in result.diff.changed_payload().items()]
+    return [
+        TierResult(
+            tier="repository",
+            scope=result.repo,
+            changed=result.has_changes,
+            applied=result.applied,
+            notes=notes,
+        )
+    ]
+
+
+TIER = RepoTier(name="repository", configured=_configured, reconcile=reconcile)

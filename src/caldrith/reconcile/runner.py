@@ -1,11 +1,16 @@
 """Top-level reconcile orchestration.
 
-``run_reconcile`` loads the admin config, selects the target repos, and applies the
-``repository`` block, ``repository.security`` toggles, ``rulesets``, provisioned
-``files`` (via PR), and any ``branches`` protection to each (or computes a dry-run
-diff). In dry-run mode it posts a GitHub Check Run summarizing the changes and mutates
-nothing — this backs the ``pull_request`` webhook flow where a proposed settings change
-on a non-default branch is previewed as a check.
+``run_reconcile`` loads the admin config, selects the target repos, and runs every
+*configured* repository-scoped tier against each (or computes a dry-run diff). Tiers are
+registered in :data:`REPO_TIERS`; the runner is a flat loop over that registry, so
+adding a tier is one import + one list entry — no new branches here.
+
+In dry-run mode it posts a GitHub Check Run summarizing the changes and mutates nothing
+— this backs the ``pull_request`` webhook flow where a proposed settings change on a
+non-default branch is previewed as a check.
+
+Org-scoped settings (``orgs.update``, org rulesets, ...) are handled separately by
+:func:`run_org_reconcile`, since they apply once per account rather than per repo.
 """
 
 from __future__ import annotations
@@ -16,13 +21,30 @@ from githubkit import GitHub
 
 from caldrith.audit.logging import bind_context, get_logger
 from caldrith.config.loader import load_admin_config
-from caldrith.config.schema import RepositorySettings
-from caldrith.reconcile.branch import BranchProtectionApplier, BranchResult
-from caldrith.reconcile.files import FileProvisioner, FilesResult
+from caldrith.reconcile import (
+    actions,
+    autolinks,
+    branch,
+    collaborators,
+    custom_properties,
+    environments,
+    files,
+    interactions,
+    labels,
+    milestones,
+    pages,
+    repository,
+    ruleset,
+    secrets,
+    security,
+    teams,
+    topics,
+    variables,
+)
+from caldrith.reconcile.base import RepoTier, TierResult
+from caldrith.reconcile.org import run_org_reconcile
+from caldrith.reconcile.overlay import has_overlays, resolve_for_repo
 from caldrith.reconcile.planner import TargetRepo, list_target_repos
-from caldrith.reconcile.repository import ApplyResult, RepositoryApplier
-from caldrith.reconcile.ruleset import RulesetApplier, RulesetResult
-from caldrith.reconcile.security import RepositorySecurityApplier, SecurityResult
 from caldrith.reconcile.selection import select_targets
 from caldrith.settings import AppConfig, get_config
 
@@ -30,102 +52,80 @@ _log = get_logger(__name__)
 
 _CHECK_NAME = "caldrith/settings"
 
+# Registry of repository-scoped tiers, applied in order per repo. Ordering matters where
+# tiers interact: ``repository`` runs first (it can rename the default branch / flip
+# features other tiers depend on), then everything else. Adding a tier = one entry here.
+REPO_TIERS: list[RepoTier] = [
+    repository.TIER,
+    security.TIER,
+    topics.TIER,
+    labels.TIER,
+    milestones.TIER,
+    collaborators.TIER,
+    teams.TIER,
+    autolinks.TIER,
+    custom_properties.TIER,
+    interactions.TIER,
+    actions.TIER,
+    variables.TIER,
+    secrets.TIER,
+    environments.TIER,
+    pages.TIER,
+    ruleset.TIER,
+    files.TIER,
+    branch.TIER,
+]
+
 
 @dataclass
 class ReconcileSummary:
-    """Aggregate outcome of a reconcile run."""
+    """Aggregate outcome of a reconcile run, across all tiers and targets."""
 
     installation_id: int
     owner: str
     dry_run: bool
-    results: list[ApplyResult]
-    branch_results: list[BranchResult] = field(default_factory=list)
-    security_results: list[SecurityResult] = field(default_factory=list)
-    ruleset_results: list[RulesetResult] = field(default_factory=list)
-    files_results: list[FilesResult] = field(default_factory=list)
+    results: list[TierResult] = field(default_factory=list)
 
     @property
-    def changed(self) -> list[ApplyResult]:
-        return [r for r in self.results if r.has_changes]
+    def changed(self) -> list[TierResult]:
+        """Tier results where drift was detected (applied or not)."""
+        return [r for r in self.results if r.changed]
 
     @property
-    def applied(self) -> list[ApplyResult]:
+    def applied(self) -> list[TierResult]:
+        """Tier results where a mutation was actually issued."""
         return [r for r in self.results if r.applied]
 
     @property
     def any_changed(self) -> bool:
-        """True if any repo, security, ruleset, file, or branch change was detected."""
-        return (
-            bool(self.changed)
-            or any(b.changed for b in self.branch_results)
-            or any(s.changed for s in self.security_results)
-            or any(r.changed for r in self.ruleset_results)
-            or any(f.changed for f in self.files_results)
-        )
+        """True if any tier on any target detected a change."""
+        return any(r.changed for r in self.results)
 
 
-def _format_check_summary(
-    results: list[ApplyResult],
-    branch_results: list[BranchResult],
-    security_results: list[SecurityResult],
-    ruleset_results: list[RulesetResult],
-    files_results: list[FilesResult],
-) -> str:
+def _format_check_summary(results: list[TierResult]) -> str:
     """Render a Markdown summary of pending changes for a Check Run body."""
-    changed = [r for r in results if r.has_changes]
-    changed_branches = [b for b in branch_results if b.changed]
-    changed_security = [s for s in security_results if s.changed]
-    changed_rulesets = [r for r in ruleset_results if r.changed]
-    changed_files = [f for f in files_results if f.changed]
-    if not any((changed, changed_branches, changed_security, changed_rulesets, changed_files)):
+    changed = [r for r in results if r.changed]
+    if not changed:
         return "No configuration changes. All repositories match the desired state."
 
+    by_tier: dict[str, list[TierResult]] = {}
+    for result in changed:
+        by_tier.setdefault(result.tier, []).append(result)
+
     lines: list[str] = []
-    if changed:
-        lines.append(f"Caldrith would apply repository changes to {len(changed)} repositor(y/ies):")
+    for tier in sorted(by_tier):
+        rows = by_tier[tier]
+        lines.append(f"### `{tier}` — {len(rows)} change(s)")
         lines.append("")
-        for result in changed:
-            lines.append(f"### `{result.repo}`")
-            payload = result.diff.changed_payload()
-            for key in sorted(payload):
-                lines.append(f"- `{key}` -> `{payload[key]!r}`")
-            lines.append("")
-    if changed_security:
-        lines.append(f"Security toggles on {len(changed_security)} repositor(y/ies):")
-        lines.append("")
-        for security in changed_security:
-            lines.append(f"- `{security.repo}`: {', '.join(security.changed_fields)}")
-        lines.append("")
-    if changed_rulesets:
-        lines.append(f"Ruleset changes on {len(changed_rulesets)} repositor(y/ies):")
-        lines.append("")
-        for ruleset in changed_rulesets:
-            lines.append(f"- `{ruleset.repo}`: {', '.join(ruleset.changed_fields)}")
-        lines.append("")
-    if changed_files:
-        lines.append(f"Workflow/file provisioning on {len(changed_files)} repositor(y/ies):")
-        lines.append("")
-        for provisioned in changed_files:
-            lines.append(f"- `{provisioned.repo}`: {', '.join(provisioned.files)}")
-        lines.append("")
-    if changed_branches:
-        lines.append(f"Branch protection changes on {len(changed_branches)} branch(es):")
-        lines.append("")
-        for branch in changed_branches:
-            lines.append(f"- `{branch.repo}` @ `{branch.branch}` ({branch.action})")
+        for result in rows:
+            notes = "; ".join(result.notes) if result.notes else "(changed)"
+            lines.append(f"- `{result.scope}`: {notes}")
         lines.append("")
     return "\n".join(lines).rstrip()
 
 
 async def _post_check_run(
-    client: GitHub,
-    owner: str,
-    head_sha: str,
-    results: list[ApplyResult],
-    branch_results: list[BranchResult],
-    security_results: list[SecurityResult],
-    ruleset_results: list[RulesetResult],
-    files_results: list[FilesResult],
+    client: GitHub, owner: str, head_sha: str, results: list[TierResult]
 ) -> None:
     """Post a dry-run Check Run to the admin repo summarizing the diff.
 
@@ -134,9 +134,7 @@ async def _post_check_run(
     PR, it only surfaces what *would* change.
     """
     config = get_config()
-    summary = _format_check_summary(
-        results, branch_results, security_results, ruleset_results, files_results
-    )
+    summary = _format_check_summary(results)
     await client.rest.checks.async_create(
         owner=owner,
         repo=config.admin_repo,
@@ -165,11 +163,11 @@ async def run_reconcile(
 ) -> ReconcileSummary:
     """Reconcile ``owner``'s repositories against the admin config.
 
-    Applies the ``repository`` block, ``repository.security`` toggles, ``rulesets``,
-    provisioned ``files``, and any ``branches`` protection. When ``repos`` is given (a
-    single repo from a ``repository`` webhook) only those repos are targeted; otherwise
-    every accessible, non-excluded repo is. In ``dry_run`` mode no mutations are issued
-    and (with ``head_sha``) a Check Run is posted.
+    Runs every configured tier in :data:`REPO_TIERS` against each target. When ``repos``
+    is given (a single repo from a ``repository`` webhook) only those repos are targeted;
+    otherwise every accessible, non-excluded repo is. In ``dry_run`` mode no mutations are
+    issued and (with ``head_sha``) a Check Run is posted. Per-tier, per-repo failures are
+    isolated and logged so one bad repo never aborts the run.
     """
     cfg = config or get_config()
     log = bind_context(_log, installation_id=installation_id)
@@ -184,20 +182,11 @@ async def run_reconcile(
         ref=ref,
     )
 
-    desired_repository: RepositorySettings | None = settings_config.repository
-    branches = settings_config.branches or []
-    rulesets = settings_config.rulesets or []
-    files = settings_config.files or []
-    desired_security = desired_repository.security if desired_repository else None
-    results: list[ApplyResult] = []
-    branch_results: list[BranchResult] = []
-    security_results: list[SecurityResult] = []
-    ruleset_results: list[RulesetResult] = []
-    files_results: list[FilesResult] = []
-
-    if desired_repository is None and not branches and not rulesets and not files:
+    overlays = has_overlays(settings_config)
+    base_configured = any(tier.configured(settings_config) for tier in REPO_TIERS)
+    if not base_configured and not overlays:
         log.info("reconcile.nothing_to_do", owner=owner, dry_run=dry_run)
-        return ReconcileSummary(installation_id, owner, dry_run, results)
+        return ReconcileSummary(installation_id, owner, dry_run, [])
 
     if repos is not None:
         targets = [TargetRepo(owner=owner, name=name) for name in repos]
@@ -208,97 +197,36 @@ async def run_reconcile(
         targets, admin_repo=cfg.admin_repo, restricted=settings_config.restricted_repos
     )
 
-    repo_applier = RepositoryApplier(client, dry_run=dry_run)
-    security_applier = RepositorySecurityApplier(client, dry_run=dry_run)
-    ruleset_applier = RulesetApplier(client, dry_run=dry_run)
-    file_provisioner = FileProvisioner(client, dry_run=dry_run)
-    branch_applier = BranchProtectionApplier(client, dry_run=dry_run)
+    results: list[TierResult] = []
     for target in targets:
-        if desired_repository is not None:
-            result = await repo_applier.apply(target, desired_repository)
-            results.append(result)
-            bind_context(log, repo=result.repo).info(
-                "reconcile.repo",
-                applied=result.applied,
-                has_changes=result.has_changes,
-                dry_run=dry_run,
-            )
-        if desired_security is not None:
-            security_result = await security_applier.apply(target, desired_security)
-            security_results.append(security_result)
-            bind_context(log, repo=security_result.repo).info(
-                "reconcile.security",
-                changed_fields=security_result.changed_fields,
-                applied=security_result.applied,
-                dry_run=dry_run,
-            )
-        if rulesets:
+        # Resolve overlays (suborgs / per-repo overrides) to the effective config for
+        # THIS repo; without overlays every repo shares the base config unchanged.
+        effective = resolve_for_repo(settings_config, target.name) if overlays else settings_config
+        for tier in REPO_TIERS:
+            if not tier.configured(effective):
+                continue
             try:
-                ruleset_result = await ruleset_applier.apply(target, rulesets)
-            except Exception as exc:  # isolate per-repo ruleset failures
+                tier_results = await tier.reconcile(client, target, effective, dry_run=dry_run)
+            except Exception as exc:  # isolate per-tier, per-repo failures
                 bind_context(log, repo=target.full_name).warning(
-                    "reconcile.ruleset.failed", error=str(exc), dry_run=dry_run
-                )
-            else:
-                ruleset_results.append(ruleset_result)
-                bind_context(log, repo=ruleset_result.repo).info(
-                    "reconcile.ruleset",
-                    changed_fields=ruleset_result.changed_fields,
-                    applied=ruleset_result.applied,
-                    dry_run=dry_run,
-                )
-        if files:
-            try:
-                files_result = await file_provisioner.apply(target, files)
-            except Exception as exc:  # isolate per-repo provisioning failures
-                bind_context(log, repo=target.full_name).warning(
-                    "reconcile.files.failed", error=str(exc), dry_run=dry_run
-                )
-            else:
-                files_results.append(files_result)
-                bind_context(log, repo=files_result.repo).info(
-                    "reconcile.files",
-                    files=files_result.files,
-                    pr_url=files_result.pr_url,
-                    applied=files_result.applied,
-                    dry_run=dry_run,
-                )
-        for branch_cfg in branches:
-            try:
-                branch_result = await branch_applier.apply(target, branch_cfg)
-            except Exception as exc:
-                bind_context(log, repo=target.full_name, branch=branch_cfg.name).warning(
-                    "reconcile.branch.failed", error=str(exc), dry_run=dry_run
+                    "reconcile.tier.failed", tier=tier.name, error=str(exc), dry_run=dry_run
                 )
                 continue
-            branch_results.append(branch_result)
-            bind_context(log, repo=branch_result.repo, branch=branch_result.branch).info(
-                "reconcile.branch",
-                action=branch_result.action,
-                changed=branch_result.changed,
-                applied=branch_result.applied,
-                dry_run=dry_run,
-            )
+            for result in tier_results:
+                results.append(result)
+                if result.changed:
+                    bind_context(log, repo=result.scope).info(
+                        "reconcile.tier",
+                        tier=result.tier,
+                        changed=result.changed,
+                        applied=result.applied,
+                        dry_run=dry_run,
+                    )
 
     if dry_run and head_sha is not None:
-        await _post_check_run(
-            client,
-            owner,
-            head_sha,
-            results,
-            branch_results,
-            security_results,
-            ruleset_results,
-            files_results,
-        )
+        await _post_check_run(client, owner, head_sha, results)
 
-    return ReconcileSummary(
-        installation_id,
-        owner,
-        dry_run,
-        results,
-        branch_results,
-        security_results,
-        ruleset_results,
-        files_results,
-    )
+    return ReconcileSummary(installation_id, owner, dry_run, results)
+
+
+__all__ = ["REPO_TIERS", "ReconcileSummary", "run_org_reconcile", "run_reconcile"]

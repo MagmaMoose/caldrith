@@ -22,8 +22,9 @@ from typing import Any
 from githubkit import GitHub
 from githubkit.exception import RequestFailed
 
-from caldrith.config.schema import RepositorySecurity
+from caldrith.config.schema import RepoScoped, RepositorySecurity
 from caldrith.github_json import response_json
+from caldrith.reconcile.base import RepoTier, TierResult
 from caldrith.reconcile.planner import TargetRepo
 
 
@@ -115,3 +116,33 @@ class RepositorySecurityApplier:
 
         result.applied = bool(result.changed_fields) and not self._dry_run
         return result
+
+
+def _configured(config: RepoScoped) -> bool:
+    """True when the repository block carries a ``security`` sub-block with any toggle."""
+    if config.repository is None or config.repository.security is None:
+        return False
+    return bool(config.repository.security.model_dump(exclude_unset=True, exclude_none=True))
+
+
+async def reconcile(
+    client: GitHub, target: TargetRepo, config: RepoScoped, *, dry_run: bool = False
+) -> list[TierResult]:
+    """Uniform adapter: reconcile repository security toggles for one repo."""
+    if config.repository is None or config.repository.security is None:
+        return []
+    result = await RepositorySecurityApplier(client, dry_run=dry_run).apply(
+        target, config.repository.security
+    )
+    return [
+        TierResult(
+            tier="security",
+            scope=result.repo,
+            changed=result.changed,
+            applied=result.applied,
+            notes=list(result.changed_fields),
+        )
+    ]
+
+
+TIER = RepoTier(name="security", configured=_configured, reconcile=reconcile)

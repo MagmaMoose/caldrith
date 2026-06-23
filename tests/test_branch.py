@@ -12,6 +12,7 @@ from githubkit import GitHub
 from caldrith.config.schema import (
     BranchConfig,
     BranchProtection,
+    BranchRestrictions,
     RequiredPullRequestReviews,
     RequiredStatusChecks,
 )
@@ -20,6 +21,12 @@ from caldrith.reconcile.planner import TargetRepo
 
 _REPO = "https://api.github.com/repos/acme/widget"
 _PROT = "https://api.github.com/repos/acme/widget/branches/main/protection"
+_SIG = "https://api.github.com/repos/acme/widget/branches/main/protection/required_signatures"
+
+
+def _sig(enabled: bool = False) -> httpx.Response:
+    """A GET commit-signature-protection response ({enabled})."""
+    return httpx.Response(200, json={"enabled": enabled, "url": _SIG})
 
 
 def _repo(**overrides: Any) -> dict[str, Any]:
@@ -83,6 +90,7 @@ async def test_noop_when_protection_matches() -> None:
     # Desired equals the live state, including the {enabled}-wrapped booleans.
     respx.get(_REPO).mock(return_value=httpx.Response(200, json=_repo()))
     respx.get(_PROT).mock(return_value=httpx.Response(200, json=_live()))
+    respx.get(_SIG).mock(return_value=_sig(False))
     put = respx.put(_PROT).mock(return_value=httpx.Response(200, json=_live()))
 
     async with GitHub("token") as client:
@@ -117,7 +125,7 @@ async def test_applies_when_unprotected() -> None:
     body = json.loads(put.calls.last.request.content)
     assert body["enforce_admins"] is True
     assert body["required_pull_request_reviews"]["required_approving_review_count"] == 1
-    assert body["restrictions"] is None  # required PUT key, deferred -> null
+    assert body["restrictions"] is None  # required PUT key; null when no restrictions declared
     assert result.changed is True and result.applied is True and result.action == "update"
 
 
@@ -125,6 +133,7 @@ async def test_applies_when_unprotected() -> None:
 async def test_detects_review_count_drift() -> None:
     respx.get(_REPO).mock(return_value=httpx.Response(200, json=_repo()))
     respx.get(_PROT).mock(return_value=httpx.Response(200, json=_live()))  # live count = 2
+    respx.get(_SIG).mock(return_value=_sig(False))
     put = respx.put(_PROT).mock(return_value=httpx.Response(200, json=_live()))
 
     cfg = BranchConfig(
@@ -247,6 +256,7 @@ async def test_noop_flattens_enabled_for_non_enforce_admins_bools() -> None:
             ),
         )
     )
+    respx.get(_SIG).mock(return_value=_sig(False))
     put = respx.put(_PROT).mock(return_value=httpx.Response(200, json=_live()))
 
     cfg = BranchConfig(
@@ -271,6 +281,52 @@ async def test_noop_flattens_enabled_for_non_enforce_admins_bools() -> None:
 
 
 @respx.mock
+async def test_restrictions_sent_in_put_body() -> None:
+    """A declared push-restrictions block is canonicalised into the PUT body."""
+    respx.get(_REPO).mock(return_value=httpx.Response(200, json=_repo()))
+    respx.get(_PROT).mock(return_value=_not_protected())
+    put = respx.put(_PROT).mock(return_value=httpx.Response(200, json=_live()))
+
+    cfg = BranchConfig(
+        name="main",
+        protection=BranchProtection(
+            enforce_admins=True,
+            restrictions=BranchRestrictions(users=["octocat"], teams=["core"], apps=["dependabot"]),
+        ),
+    )
+    async with GitHub("token") as client:
+        result = await BranchProtectionApplier(client).apply(TargetRepo("acme", "widget"), cfg)
+
+    assert put.called
+    body = json.loads(put.calls.last.request.content)
+    assert body["restrictions"] == {
+        "users": ["octocat"],
+        "teams": ["core"],
+        "apps": ["dependabot"],
+    }
+    assert result.applied is True
+
+
+@respx.mock
+async def test_required_signatures_enabled_via_dedicated_endpoint() -> None:
+    """required_signatures drift triggers the commit-signature endpoint, not the PUT."""
+    respx.get(_REPO).mock(return_value=httpx.Response(200, json=_repo()))
+    respx.get(_PROT).mock(return_value=httpx.Response(200, json=_live()))
+    respx.get(_SIG).mock(return_value=_sig(False))  # signatures currently OFF
+    put = respx.put(_PROT).mock(return_value=httpx.Response(200, json=_live()))
+    create_sig = respx.post(_SIG).mock(return_value=httpx.Response(200, json=_sig(True).json()))
+
+    cfg = _matching_config()  # equals live protection EXCEPT we now want signatures on
+    cfg.protection.required_signatures = True  # type: ignore[union-attr]
+    async with GitHub("token") as client:
+        result = await BranchProtectionApplier(client).apply(TargetRepo("acme", "widget"), cfg)
+
+    assert not put.called  # the PUT body is unchanged — only signatures differ
+    assert create_sig.called
+    assert result.changed is True and result.applied is True
+
+
+@respx.mock
 async def test_contexts_sort_is_idempotent() -> None:
     """Live contexts in a different order from desired must not cause spurious drift."""
     respx.get(_REPO).mock(return_value=httpx.Response(200, json=_repo()))
@@ -287,6 +343,7 @@ async def test_contexts_sort_is_idempotent() -> None:
             ),
         )
     )
+    respx.get(_SIG).mock(return_value=_sig(False))
     put = respx.put(_PROT).mock(return_value=httpx.Response(200, json=_live()))
 
     cfg = BranchConfig(

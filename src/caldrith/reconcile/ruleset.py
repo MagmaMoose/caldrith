@@ -23,8 +23,9 @@ from typing import Any
 
 from githubkit import GitHub
 
-from caldrith.config.schema import Ruleset
+from caldrith.config.schema import RepoScoped, Ruleset
 from caldrith.github_json import response_json
+from caldrith.reconcile.base import RepoTier, TierResult
 from caldrith.reconcile.planner import TargetRepo
 
 
@@ -156,3 +157,24 @@ class RulesetApplier:
 
         result.applied = bool(result.changed_fields) and not self._dry_run
         return result
+
+
+async def reconcile(
+    client: GitHub, target: TargetRepo, config: RepoScoped, *, dry_run: bool = False
+) -> list[TierResult]:
+    """Uniform adapter: reconcile repo rulesets for one repo."""
+    if not config.rulesets:
+        return []
+    result = await RulesetApplier(client, dry_run=dry_run).apply(target, config.rulesets)
+    return [
+        TierResult(
+            tier="rulesets",
+            scope=result.repo,
+            changed=result.changed,
+            applied=result.applied,
+            notes=list(result.changed_fields),
+        )
+    ]
+
+
+TIER = RepoTier(name="rulesets", configured=lambda c: bool(c.rulesets), reconcile=reconcile)
