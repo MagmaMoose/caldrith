@@ -40,7 +40,12 @@ never remove (pruning would orphan data). Know which is which:
 
 | Prunes undeclared | Additive (never prunes) |
 | --- | --- |
-| `labels`, `collaborators`, `teams`, `autolinks`, `variables`, `topics`, branch protection (full-replace), `secrets` *(only when `prune: true`)* | `milestones`, `environments`, `rulesets`, `custom_properties`, `files` |
+| `labels`, `collaborators`, `teams`, `autolinks`, `variables`, `topics`, branch protection (full-replace), `secrets` *(only when `prune: true`)* | `milestones`, `environments`, `rulesets`, `custom_properties` |
+
+`files` is a special case: it prunes a file the config no longer declares from the
+**provisioning PR** (the `ci/caldrith/managed-files` branch) — never from a repo's
+default branch, which Caldrith only changes when that PR is merged. See
+[Provisioned files](#provisioned-files-required-workflows).
 
 ### Self-healing (drift events)
 
@@ -483,7 +488,7 @@ pages:
 A `files:` list makes Caldrith **provision files into every managed repo via a
 pull request** — the way required workflows (the Chargate gate, a Diatreme release)
 get rolled out org-wide. Caldrith never pushes to the default branch directly: it
-opens (and reuses) one PR per repo from a stable `caldrith/managed-files` branch.
+opens (and reuses) one PR per repo from a stable `ci/caldrith/managed-files` branch.
 
 ```yaml
 files:
@@ -517,6 +522,20 @@ Idempotent and non-destructive: files already matching are skipped, the PR branc
 reused, and an open PR is never duplicated — so re-running while a PR is pending does
 nothing. An **empty repository** (no commit on its default branch) is skipped gracefully
 — there is nothing to branch a PR from yet.
+
+**Pruning.** When you drop a file from `files:` (or add a repo to its `skip_repos`),
+Caldrith removes it from the provisioning PR on the next reconcile so the PR reflects
+only the currently-required files. It only ever edits its own `ci/caldrith/managed-files`
+branch: a file it had added net-new is deleted; a repo file it had merely updated is
+reverted to the default branch's version (the repo's own files are never removed). If
+pruning leaves nothing to provision, the now-empty PR is **closed and its branch
+deleted** rather than left dangling.
+
+!!! warning "Removing the last file does not clean up"
+    Pruning runs only while the `files:` block still declares **at least one** file —
+    that is what makes the tier run. Removing the *last* entry (or the whole block) skips
+    the files tier entirely, so existing provisioning PRs are **not** pruned or closed.
+    Keep one file declared, or close any leftover managed PRs by hand.
 
 !!! tip "Sequencing with a required-check ruleset"
     To enforce the Chargate gate org-wide, provision `security.yml` (here) **and** add a
