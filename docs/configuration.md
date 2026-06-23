@@ -444,6 +444,156 @@ unmanaged.)
 | `actor_type` | required | `RepositoryRole` \| `Team` \| `Integration` \| `OrganizationAdmin` \| `DeployKey`. |
 | `bypass_mode` | `always` | When the bypass applies: `always` \| `pull_request`. |
 
+### Conditions
+
+`conditions` selects which refs (and, for org rulesets, which repositories) a ruleset
+applies to. `branch` and `tag` rulesets use `ref_name`:
+
+```yaml
+conditions:
+  ref_name:
+    include: ["~DEFAULT_BRANCH"]      # also ~ALL, refs/heads/main, refs/heads/release/* (fnmatch)
+    exclude: ["refs/heads/legacy/*"]
+```
+
+- `~DEFAULT_BRANCH` — the repo's default branch, resolved per repo.
+- `~ALL` — every ref of the target type.
+- Otherwise fully-qualified refs (`refs/heads/…`, `refs/tags/…`) or fnmatch patterns.
+
+**Organization rulesets** (`organization.rulesets`) also target *which repos* they reach —
+add one of `repository_name`, `repository_id`, or `repository_property`:
+
+```yaml
+conditions:
+  ref_name: { include: ["~DEFAULT_BRANCH"], exclude: [] }
+  repository_name:                          # by name (fnmatch); or:
+    include: ["svc-*"]
+    exclude: ["svc-legacy"]
+    protected: true                         # optional — only repos flagged protected
+  # repository_id: { repository_ids: [123, 456] }
+  # repository_property: { include: [{ name: tier, property_values: ["gold"] }], exclude: [] }
+```
+
+A `push` ruleset applies to the whole repository, so it takes **no** `ref_name`.
+
+### Rules
+
+Each `rules` entry is `{ type, parameters? }`, sent to the API verbatim. Common
+branch/tag rules and their key parameters:
+
+| `type` | Parameters |
+| --- | --- |
+| `creation`, `deletion` | — (restrict who may create / delete matching refs) |
+| `update` | `update_allows_fetch_and_merge` |
+| `required_linear_history` | — |
+| `required_signatures` | — (signed commits) |
+| `non_fast_forward` | — (block force-pushes) |
+| `required_deployments` | `required_deployment_environments: [str]` |
+| `pull_request` | `required_approving_review_count`, `dismiss_stale_reviews_on_push`, `require_code_owner_review`, `require_last_push_approval`, `required_review_thread_resolution`, `allowed_merge_methods: [merge\|squash\|rebase]` |
+| `required_status_checks` | `required_status_checks: [{context, integration_id?}]`, `strict_required_status_checks_policy`, `do_not_enforce_on_create?` |
+| `commit_message_pattern`, `commit_author_email_pattern`, `committer_email_pattern`, `branch_name_pattern`, `tag_name_pattern` | `operator: starts_with\|ends_with\|contains\|regex`, `pattern`, `name?`, `negate?` |
+
+`push` rulesets (`target: push`) add file rules — `file_path_restriction`,
+`file_extension_restriction`, `max_file_path_length`, `max_file_size`, `code_scanning` —
+several of which require GitHub Advanced Security. For the complete, current list and
+exact parameter shapes, see GitHub's
+[Available rules for rulesets](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-rulesets/available-rules-for-rulesets)
+and the [Rules REST reference](https://docs.github.com/en/rest/repos/rules); caldrith
+passes whatever you declare through unchanged.
+
+!!! note "Two ways to require signed commits"
+    A ruleset `required_signatures` rule and `branches[].protection.required_signatures`
+    both enforce signing, by different mechanisms — pick one to avoid two overlapping
+    controls on the same branch.
+
+### Bypass actors — finding `actor_id`
+
+`actor_type` determines what `actor_id` means:
+
+| `actor_type` | `actor_id` |
+| --- | --- |
+| `RepositoryRole` | role id: `1` read, `2` triage, `3` write, `4` maintain, `5` admin |
+| `Team` | the team's numeric id |
+| `Integration` | the GitHub App's id (e.g. a release / Flux app that must push without the gate) |
+| `OrganizationAdmin` | `1` |
+| `DeployKey` | n/a — the deploy key used for the push |
+
+`bypass_mode` is `always` or `pull_request` (bypass only for changes that go through a
+PR). caldrith treats a declared `bypass_actors` list as the **exact** desired set — a
+manually-added extra is reverted as drift; omit the key to leave the live list unmanaged.
+
+### Repository vs. organization rulesets
+
+- **Repository rulesets** — the top-level `rulesets:` (or a `repos:` / `suborgs:` overlay),
+  applied per managed repo. caldrith reconciles only a repo's **own** rulesets
+  (`source_type: Repository`); org-inherited ones (`source_type: Organization`) are left
+  alone, so an org ruleset is never duplicated or edited from the repo side.
+- **Organization rulesets** — `organization.rulesets`, defined once on the org and applied
+  across repos via the `repository_*` conditions above. (Org rulesets need GitHub Team /
+  Enterprise — see [Plan-gated settings](#plan-gated-settings).)
+
+### More examples
+
+Protect release tags (only bypass actors may create / delete / move them):
+
+```yaml
+rulesets:
+  - name: Protect release tags
+    target: tag
+    enforcement: active
+    conditions:
+      ref_name: { include: ["refs/tags/v*"], exclude: [] }
+    rules:
+      - type: deletion
+      - type: update
+      - type: required_signatures
+```
+
+A fuller default-branch gate — PR review + green CI + linear history + no force-push:
+
+```yaml
+rulesets:
+  - name: Default branch protections
+    target: branch
+    enforcement: active
+    conditions:
+      ref_name: { include: ["~DEFAULT_BRANCH"], exclude: [] }
+    rules:
+      - type: pull_request
+        parameters:
+          required_approving_review_count: 1
+          dismiss_stale_reviews_on_push: true
+          require_code_owner_review: true
+          required_review_thread_resolution: true
+      - type: required_status_checks
+        parameters:
+          required_status_checks:
+            - context: "chargate / chargate"
+          strict_required_status_checks_policy: true
+      - type: required_linear_history
+      - type: non_fast_forward
+```
+
+Roll a ruleset out in monitor-only mode first with `enforcement: evaluate` (it reports
+what *would* be blocked without blocking), then flip to `active` once it's clean.
+
+An organization ruleset scoped to a subset of repos by custom property:
+
+```yaml
+organization:
+  rulesets:
+    - name: Org default-branch signing
+      target: branch
+      enforcement: active
+      conditions:
+        ref_name: { include: ["~DEFAULT_BRANCH"], exclude: [] }
+        repository_property:
+          include: [{ name: tier, property_values: ["gold"] }]
+          exclude: []
+      rules:
+        - type: required_signatures
+```
+
 ## Labels
 
 A `labels:` list is the **complete** desired label set (full-replace): missing
