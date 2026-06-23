@@ -2,6 +2,48 @@
 
 <!-- version list -->
 
+## v1.5.0 (2026-06-23)
+
+### Bug Fixes
+
+- Avoid 422 when a label rename target already exists
+  ([#17](https://github.com/MagmaMoose/caldrith/pull/17),
+  [`923a017`](https://github.com/MagmaMoose/caldrith/commit/923a017dbb9ce44d5b719000ec5267ca46df7b25))
+
+- Establish branch protection before enabling required_signatures
+  ([#17](https://github.com/MagmaMoose/caldrith/pull/17),
+  [`923a017`](https://github.com/MagmaMoose/caldrith/commit/923a017dbb9ce44d5b719000ec5267ca46df7b25))
+
+- Gate secret prune on the declared store, not the global flag
+  ([#17](https://github.com/MagmaMoose/caldrith/pull/17),
+  [`923a017`](https://github.com/MagmaMoose/caldrith/commit/923a017dbb9ce44d5b719000ec5267ca46df7b25))
+
+### Chores
+
+- Update caldrith image
+  ([`0e93e8f`](https://github.com/MagmaMoose/caldrith/commit/0e93e8f125bcc98b53fdff713c53a6421ae97a88))
+
+### Features
+
+- Enforce the full GitHub configuration surface
+  ([#17](https://github.com/MagmaMoose/caldrith/pull/17),
+  [`923a017`](https://github.com/MagmaMoose/caldrith/commit/923a017dbb9ce44d5b719000ec5267ca46df7b25))
+
+
+## v1.4.2 (2026-06-21)
+
+### Bug Fixes
+
+- Make file-provisioning and ruleset tiers fleet-safe
+  ([#16](https://github.com/MagmaMoose/caldrith/pull/16),
+  [`98ae292`](https://github.com/MagmaMoose/caldrith/commit/98ae292f0e53898d8c18acfff578c33165557274))
+
+### Chores
+
+- Update caldrith image
+  ([`37ea17f`](https://github.com/MagmaMoose/caldrith/commit/37ea17f7c3475abc64bac3538bc0898ef7c6af4c))
+
+
 ## v1.4.1 (2026-06-21)
 
 ### Bug Fixes

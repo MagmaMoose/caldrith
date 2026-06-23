@@ -76,3 +76,17 @@ async def enqueue_reconcile_repo(
         dry_run=dry_run,
         head_sha=head_sha,
     )
+
+
+async def enqueue_reconcile_org(
+    arq_redis: Any,
+    *,
+    installation_id: int,
+    owner: str,
+) -> None:
+    """Enqueue an organization-scoped reconcile for an installation."""
+    await arq_redis.enqueue_job(
+        "reconcile_org",
+        installation_id=installation_id,
+        owner=owner,
+    )

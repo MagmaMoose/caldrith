@@ -9,31 +9,36 @@ design splits into a **pure core** (config schema + diff — no I/O) and the
 `POST /` must finish well inside GitHub's 10s timeout:
 read **raw** body → **verify** HMAC-SHA256 over those bytes → **dedup** on
 `X-GitHub-Delivery` (Redis `SETNX`+TTL) → **enqueue** an ARQ job → **`202`**.
-No reconcile in the request. Full-account syncs **fan out one job per repo**.
+No reconcile in the request. Full-account syncs **fan out one job per repo** (plus
+one `reconcile_org` job for Organization accounts).
 
 ## Pure core vs edges
 
-- **PURE (`src/caldrith/config/`)** — `schema.py` (RepositorySettings +
-  SafeSettingsConfig, mirrors safe-settings), `loader.py` (fetch settings.yml →
-  `yaml.safe_load` → validate), `diff.py` (`compare_deep` → additions /
+- **PURE (`src/caldrith/config/`)** — `schema.py` (all tier models on `RepoScoped` +
+  `OrganizationSettings` + overlays, mirrors safe-settings), `loader.py` (fetch
+  settings.yml → `yaml.safe_load` → validate), `diff.py` (`compare_deep` → additions /
   modifications / deletions / has_changes; ignore `url`-keys + `id`/`node_id`).
   No `githubkit`, ARQ, or FastAPI imports here.
-- **EDGES** — `api/` (app factory, webhooks, security HMAC, slowapi ratelimit),
-  `auth/client.py` (GitHubClientFactory.for_installation — githubkit
-  AppInstallationAuthStrategy, per-install token, configurable base_url),
-  `reconcile/` (planner: list target repos, Organization vs User aware;
-  repository: RepositoryApplier diffs live vs desired, PATCH or NopResult;
-  runner: orchestrate, dry-run posts a Check Run), `worker/` (ARQ WorkerSettings,
-  jobs reconcile_installation / reconcile_repo; queue.py dedup_delivery),
-  `audit/logging.py` (structlog JSON).
+- **EDGES** — `api/` (app factory, webhooks + reactive drift events, security HMAC,
+  slowapi ratelimit), `auth/client.py` (GitHubClientFactory.for_installation —
+  githubkit AppInstallationAuthStrategy, per-install token, configurable base_url),
+  `reconcile/` (**registry design**: `base.py` = `TierResult` + `RepoTier`; each tier
+  module — repository/security/topics/labels/milestones/collaborators/teams/autolinks/
+  custom_properties/interactions/actions/variables/secrets/environments/pages/ruleset/
+  files/branch — exposes a `reconcile()` adapter + a `TIER`; `runner.REPO_TIERS` is a
+  flat per-repo loop; `org.py` = `run_org_reconcile` for the `organization` block;
+  `overlay.py` = `resolve_for_repo` (base → suborgs → repos); planner lists repos /
+  resolves account type), `worker/` (jobs reconcile_installation / reconcile_repo /
+  reconcile_org; queue.py dedup_delivery), `audit/logging.py` (structlog JSON).
 
 ## Webhook → effect
 
 | Event | Trigger | Effect |
 | --- | --- | --- |
-| `push` | admin repo default branch | reconcile ALL repos (fan out per repo) |
+| `push` | admin repo default branch | reconcile ALL repos (fan out per repo) + org |
 | `repository` | created/edited | reconcile THAT repo |
 | `pull_request` | settings change, non-default branch | DRY-RUN → Check Run; mutate nothing |
+| `label`/`milestone`/`member`/`branch_protection_rule`/`repository_ruleset`/`public` | out-of-band change | self-heal: reconcile the affected repo (or org) |
 
 ## Idempotency & isolation
 

@@ -9,10 +9,18 @@ Create a GitHub App on github.com with:
 
 - **Webhook URL** pointing at your deployment's `POST /`.
 - **Webhook secret** — a strong random string (becomes `WEBHOOK_SECRET`).
-- **Permissions** (P1): repository **Administration** read/write (to update
-  settings), **Contents** read (to fetch the admin repo's `settings.yml`), and
-  **Checks** read/write (to post dry-run Check Runs).
-- **Subscribe to events**: `push`, `repository`, `pull_request`.
+- **Permissions**: repository **Administration** read/write (settings, branch
+  protection, rulesets, autolinks), **Contents** read/write (fetch the admin repo's
+  `settings.yml`; open provisioning PRs), **Pull requests** read/write (provisioning
+  PRs), **Checks** read/write (dry-run Check Runs), **Issues** read/write (labels,
+  milestones), **Members** / **Administration** as needed for collaborators and
+  teams, **Secrets** / **Variables** / **Environments** read/write, **Actions** /
+  **Workflows** read/write, **Pages** read/write, and **Organization
+  administration** read/write (the `organization:` block, org rulesets, org custom
+  properties). Grant only the tiers you use.
+- **Subscribe to events**: `push`, `repository`, `pull_request`, plus the
+  self-healing drift events `label`, `milestone`, `member`,
+  `branch_protection_rule`, `repository_ruleset`, and `public`.
 
 Generate a **private key** (PEM) and note the **App ID**.
 
@@ -32,6 +40,7 @@ example a Kubernetes env populated by an OCI Vault `ExternalSecret`).
 | `ADMIN_REPO` | `admin` | Admin repo name per installation. |
 | `CONFIG_PATH` | `.github` | Directory holding the settings file. |
 | `SETTINGS_FILE_PATH` | `settings.yml` | The settings file name. |
+| `CALDRITH_SECRET_<NAME>` | — | Value for a declared `secrets:` entry `<NAME>` (used to create a missing repo secret; never read back from GitHub). |
 
 !!! danger "Never put secrets in the repo"
     `PRIVATE_KEY`, `WEBHOOK_SECRET`, and friends are **env-only**. The `.gitignore`
