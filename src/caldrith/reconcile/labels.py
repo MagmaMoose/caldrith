@@ -73,7 +73,15 @@ async def reconcile(
         if desired.description is not None:
             body["description"] = desired.description
 
-        if desired.oldname and desired.oldname in live and desired.oldname != desired.name:
+        # Only rename when the NEW name is free — renaming onto an existing label 422s.
+        # If both old and new already exist, fall through to update the new name; the now
+        # redundant old name isn't added to `keep`, so it is pruned below.
+        if (
+            desired.oldname
+            and desired.oldname in live
+            and desired.oldname != desired.name
+            and desired.name not in live
+        ):
             keep.add(desired.oldname)
             result.changed = True
             result.notes.append(f"rename label: {desired.oldname} -> {desired.name}")

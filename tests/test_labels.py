@@ -143,6 +143,38 @@ async def test_renames_via_oldname() -> None:
 
 
 @respx.mock
+async def test_rename_skipped_when_new_name_already_exists() -> None:
+    """Both old and new names live: don't rename onto an existing label (would 422).
+
+    Instead the existing new name is kept (updated if drifted) and the now-redundant old
+    name is pruned — a clean full-replace outcome rather than a 422.
+    """
+    respx.get(_LABELS).mock(
+        return_value=httpx.Response(
+            200,
+            json=[_label("wontfix", "ff0000", "x"), _label("wont-fix", "ff0000", "x")],
+        )
+    )
+    rename = respx.patch(f"{_LABELS}/wontfix").mock(return_value=httpx.Response(200, json={}))
+    delete = respx.delete(f"{_LABELS}/wontfix").mock(return_value=httpx.Response(204))
+
+    async with GitHub("token") as client:
+        results = await labels.reconcile(
+            client,
+            _TARGET,
+            _config(
+                [{"name": "wont-fix", "color": "#ff0000", "description": "x", "oldname": "wontfix"}]
+            ),
+        )
+
+    assert not rename.called  # no rename onto an existing label -> no 422
+    assert delete.called  # the redundant old name is pruned
+    result = results[0]
+    assert result.changed is True
+    assert result.applied is True
+
+
+@respx.mock
 async def test_dry_run_never_writes() -> None:
     respx.get(_LABELS).mock(return_value=httpx.Response(200, json=[]))
     post = respx.post(_LABELS).mock(return_value=httpx.Response(201, json={}))
