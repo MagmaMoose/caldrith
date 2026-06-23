@@ -110,8 +110,8 @@ async def test_prune_deletes_undeclared_secret(monkeypatch: pytest.MonkeyPatch) 
         return_value=httpx.Response(200, json=_list_body("DEPLOY_KEY", "OLD_KEY"))
     )
     delete = respx.delete(f"{_ACTIONS}/OLD_KEY").mock(return_value=httpx.Response(204))
-    # prune=True also reconciles the dependabot store (empty here -> nothing to prune).
-    respx.get(_DEPENDABOT).mock(return_value=httpx.Response(200, json=_list_body()))
+    # actions-only config -> the undeclared dependabot store is never listed/touched
+    # (no _DEPENDABOT mock is registered; reconciling it would raise an unmatched request).
 
     async with GitHub("token") as client:
         results = await secrets.reconcile(
@@ -126,6 +126,34 @@ async def test_prune_deletes_undeclared_secret(monkeypatch: pytest.MonkeyPatch) 
 
 
 @respx.mock
+async def test_prune_only_touches_declared_store(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Regression: actions-only + prune must NOT prune the undeclared dependabot store.
+
+    A store is managed iff it lists at least one secret. With ``{actions: [...], prune:
+    true}`` the dependabot store is undeclared, so it is never listed or deleted from —
+    otherwise every live dependabot secret would be wiped (data loss).
+    """
+    monkeypatch.setenv("CALDRITH_SECRET_DEPLOY_KEY", "s3cret")
+    respx.get(_ACTIONS).mock(return_value=httpx.Response(200, json=_list_body("DEPLOY_KEY")))
+    dep_list = respx.get(_DEPENDABOT).mock(
+        return_value=httpx.Response(200, json=_list_body("LIVE_DEP_SECRET"))
+    )
+    dep_delete = respx.delete(f"{_DEPENDABOT}/LIVE_DEP_SECRET").mock(
+        return_value=httpx.Response(204)
+    )
+
+    async with GitHub("token") as client:
+        results = await secrets.reconcile(
+            client, _TARGET, _config(actions=["DEPLOY_KEY"], prune=True)
+        )
+
+    (result,) = results
+    assert not dep_list.called  # undeclared store never even listed
+    assert not dep_delete.called  # ...so its live secret survives
+    assert not any("dependabot" in n for n in result.notes)
+
+
+@respx.mock
 async def test_dry_run_never_writes(monkeypatch: pytest.MonkeyPatch) -> None:
     """(e) dry_run=True -> drift detected but no public-key GET, no PUT, no DELETE."""
     monkeypatch.setenv("CALDRITH_SECRET_DEPLOY_KEY", "s3cret")
@@ -135,8 +163,7 @@ async def test_dry_run_never_writes(monkeypatch: pytest.MonkeyPatch) -> None:
     )
     put = respx.put(f"{_ACTIONS}/DEPLOY_KEY").mock(return_value=httpx.Response(201))
     delete = respx.delete(f"{_ACTIONS}/OLD_KEY").mock(return_value=httpx.Response(204))
-    # prune=True also lists the dependabot store (reads only; dry-run writes nothing).
-    respx.get(_DEPENDABOT).mock(return_value=httpx.Response(200, json=_list_body()))
+    # actions-only config -> the dependabot store is not listed (no _DEPENDABOT mock).
 
     async with GitHub("token") as client:
         results = await secrets.reconcile(

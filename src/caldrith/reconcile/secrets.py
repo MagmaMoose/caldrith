@@ -109,7 +109,10 @@ async def reconcile(
         return []
     result = TierResult(tier="secrets", scope=target.full_name)
     did_write = False
-    if secrets.actions or secrets.prune:
+    # `prune` must only affect a store you actually declare secrets in — otherwise a
+    # config with only `actions:` + `prune: true` would wipe ALL Dependabot secrets
+    # (and vice-versa). A store is "managed" iff it lists at least one secret.
+    if secrets.actions:
         did_write |= await _reconcile_store(
             client.rest.actions,
             target,
@@ -119,7 +122,7 @@ async def reconcile(
             dry_run=dry_run,
             result=result,
         )
-    if secrets.dependabot or secrets.prune:
+    if secrets.dependabot:
         did_write |= await _reconcile_store(
             client.rest.dependabot,
             target,
