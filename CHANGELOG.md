@@ -2,6 +2,38 @@
 
 <!-- version list -->
 
+## v1.7.0 (2026-06-23)
+
+### Chores
+
+- Gitignore .idea/ and .vscode/ (IDE config) ([#25](https://github.com/MagmaMoose/caldrith/pull/25),
+  [`c829d02`](https://github.com/MagmaMoose/caldrith/commit/c829d0266c89812741dc9d7ab9f35c80f6a4969b))
+
+### Documentation
+
+- **configuration**: Document Code Quality & Code Coverage ruleset rules
+  ([#24](https://github.com/MagmaMoose/caldrith/pull/24),
+  [`8c81345`](https://github.com/MagmaMoose/caldrith/commit/8c8134516b6d3dea961dab3430034e04b24ee9ed))
+
+- **configuration**: Expand the rulesets reference
+  ([#24](https://github.com/MagmaMoose/caldrith/pull/24),
+  [`8c81345`](https://github.com/MagmaMoose/caldrith/commit/8c8134516b6d3dea961dab3430034e04b24ee9ed))
+
+- **configuration**: Flag plan-gated (paid) settings
+  ([#24](https://github.com/MagmaMoose/caldrith/pull/24),
+  [`8c81345`](https://github.com/MagmaMoose/caldrith/commit/8c8134516b6d3dea961dab3430034e04b24ee9ed))
+
+### Features
+
+- **overlay**: Scope overlays by repo visibility
+  ([#25](https://github.com/MagmaMoose/caldrith/pull/25),
+  [`c829d02`](https://github.com/MagmaMoose/caldrith/commit/c829d0266c89812741dc9d7ab9f35c80f6a4969b))
+
+- **overlay**: Scope overlays by repo visibility (e.g. paid features on public repos only)
+  ([#25](https://github.com/MagmaMoose/caldrith/pull/25),
+  [`c829d02`](https://github.com/MagmaMoose/caldrith/commit/c829d0266c89812741dc9d7ab9f35c80f6a4969b))
+
+
 ## v1.6.1 (2026-06-23)
 
 ### Bug Fixes
