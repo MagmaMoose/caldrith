@@ -106,6 +106,43 @@ The built-in exclusions (admin repo, `.github`, archived) apply regardless of
 | `include` | — | Allowlist of repo-name globs; when set, only matching repos are managed. |
 | `exclude` | — | Repo-name globs to skip. |
 
+## Plan-gated settings
+
+caldrith reconciles whatever your GitHub plan allows — it does **not** check entitlements
+before writing. Most tiers work on every plan, but several are **plan-gated on private and
+internal repositories** (all are free on public repos). If you declare one on a repo whose
+plan doesn't include it, GitHub rejects the write (HTTP `403`/`422`); caldrith isolates
+that to the one tier on the one repo — it logs `reconcile.tier.failed` and carries on — so
+the setting simply never takes effect. (A dry-run Check still shows it as a pending change:
+caldrith diffs desired vs. live and can't tell in advance that the apply will be refused.)
+
+| Setting | Free on | Paid plan needed (private / internal repos) |
+| --- | --- | --- |
+| `branches` — branch protection | public repos | GitHub Pro / Team / Enterprise |
+| `rulesets` — repo rulesets | public repos | GitHub Pro / Team / Enterprise |
+| `repository.security_and_analysis` — secret scanning + push protection | public repos | **GitHub Secret Protection** (Team / Enterprise, per active committer) |
+| `repository.security_and_analysis` — `advanced_security` / code scanning | public repos | **GitHub Code Security** (Team / Enterprise, per active committer) |
+| `environments` — required `reviewers` | public repos | GitHub Enterprise |
+| `environments` — `deployment_branch_policy` | public repos | GitHub Pro / Team / Enterprise |
+| `pages` on a private repo | public repos | GitHub Pro / Team / Enterprise |
+| `organization.*_for_new_repositories` security defaults | — | the org must hold GitHub Advanced Security / Secret Protection / Code Security seats |
+| `organization` `rulesets`, `custom_property_definitions` | — | GitHub Team / Enterprise |
+
+Everything else works on **every** plan, public or private: repository basics, `topics`,
+`labels`, `milestones`, `collaborators`, `teams`, `autolinks`, `variables`, `secrets`,
+`actions`, `interaction_limits`, provisioned `files`, and the Dependabot toggles under
+`repository.security` (vulnerability alerts, automated security fixes, private
+vulnerability reporting).
+
+!!! warning "One unavailable field can block its whole tier"
+    `repository.security_and_analysis` rides in the **same `repos.update` PATCH** as the
+    rest of the `repository:` block (and the org security defaults in the same
+    `orgs.update` PATCH as the rest of `organization:`). If GitHub refuses the unavailable
+    field, the **entire** PATCH fails — so the other fields in that block don't apply for
+    that repo/org either. Scope plan-gated fields to repos that can use them with a
+    `repos:` / `suborgs:` overlay (or `restrictedRepos`) rather than declaring them
+    org-wide.
+
 ## The `repository:` block
 
 The `repository:` block maps to the GitHub repo-update API (`PATCH /repos/{owner}/{repo}`).
@@ -202,6 +239,12 @@ repository:
 
 ## Repository security
 
+!!! info "These toggles are free; secret scanning is not"
+    The Dependabot/reporting toggles here work on **every** plan, public or private.
+    Secret scanning, push protection and code scanning are configured under
+    `repository.security_and_analysis` (in the `repository:` block) and are **paid on
+    private/internal repos** — see [Plan-gated settings](#plan-gated-settings).
+
 A `repository.security` block toggles the repo's Dependabot and reporting switches.
 These are read and flipped only on drift (idempotent), via dedicated GitHub
 endpoints (not `repos.update`):
@@ -228,6 +271,10 @@ through to `repos.update`).
 | `enablePrivateVulnerabilityReporting` | — | Toggle private vulnerability reporting. |
 
 ## Branch protection
+
+!!! info "Paid on private repos"
+    Branch protection on a private/internal repo needs GitHub Pro / Team / Enterprise
+    (free on public repos) — see [Plan-gated settings](#plan-gated-settings).
 
 Add a `branches:` list to protect branches. Each entry has a `name` (a literal
 branch, or `default` to resolve the repo's default branch) and a `protection`
@@ -330,6 +377,11 @@ actually differs. `protection: null` removes protection.
 | `apps` | `[]` | GitHub App slugs allowed to push. |
 
 ## Rulesets
+
+!!! info "Paid on private repos"
+    Rulesets on a private/internal repo need GitHub Pro / Team / Enterprise (free on
+    public repos); org-level rulesets need Team / Enterprise — see
+    [Plan-gated settings](#plan-gated-settings).
 
 A `rulesets:` list declares **repository rulesets** Caldrith reconciles onto every
 managed repo (matched by `name`: created if absent, updated on drift). `rules`
@@ -651,6 +703,11 @@ secrets:
 | `prune` | `false` | When `true`, delete live secrets not declared — only in the stores you populate. |
 
 ## Environments
+
+!!! info "Protection rules are paid on private repos"
+    On private/internal repos, required `reviewers` need GitHub Enterprise and
+    `deployment_branch_policy` needs Pro / Team / Enterprise (both free on public repos) —
+    see [Plan-gated settings](#plan-gated-settings).
 
 An `environments:` list is reconciled by `name` (create/update). A declared
 environment that is absent is created; one with drift in a *declared* field
