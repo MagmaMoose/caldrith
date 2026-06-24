@@ -380,9 +380,7 @@ class FileProvisioner:
             result.files = []
             result.removed = []
             return result
-        additions, deletions = await self._build_changes(
-            target, default_branch, needed, orphans
-        )
+        additions, deletions = await self._build_changes(target, default_branch, needed, orphans)
         if additions or deletions:
             await self._commit_on_branch(target, head_oid, additions, deletions)
         result.pr_url = await self._ensure_pr(target, default_branch)

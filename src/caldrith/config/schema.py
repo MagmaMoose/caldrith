@@ -421,6 +421,30 @@ class PagesConfig(BaseModel):
     https_enforced: bool | None = None
 
 
+class CodeScanningDefaultSetup(BaseModel):
+    """CodeQL **default setup** — code scanning without a committed workflow file.
+
+    Enabled via the API rather than a workflow; free on public repos, but on
+    private/internal repos it needs GitHub Code Security (the update 403/422s without it,
+    isolated per tier). ``state`` mirrors the API; ``query_suite`` and ``languages`` are
+    optional refinements — omit ``languages`` to let GitHub auto-detect.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    state: str  # configured | not-configured
+    query_suite: str | None = None  # default | extended
+    languages: list[str] | None = None
+    runner_type: str | None = None  # standard | labeled
+    runner_label: str | None = None
+
+    @model_validator(mode="after")
+    def _check_state(self) -> CodeScanningDefaultSetup:
+        if self.state not in {"configured", "not-configured"}:
+            raise ValueError("code_scanning.state must be 'configured' or 'not-configured'")
+        return self
+
+
 # ---------------------------------------------------------------------------
 # Repository-scoped tier container (reused by overlays)
 # ---------------------------------------------------------------------------
@@ -456,6 +480,7 @@ class RepoScoped(BaseModel):
     secrets: SecretsConfig | None = None
     environments: list[Environment] | None = None
     pages: PagesConfig | None = None
+    code_scanning: CodeScanningDefaultSetup | None = None
 
 
 class RestrictedRepos(BaseModel):
