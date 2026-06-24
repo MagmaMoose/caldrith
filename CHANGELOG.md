@@ -2,6 +2,25 @@
 
 <!-- version list -->
 
+## v1.10.0 (2026-06-24)
+
+### Chores
+
+- Update caldrith image
+  ([`3af9acd`](https://github.com/MagmaMoose/caldrith/commit/3af9acd37a47a4afa10e4b0e0cd6037e3475215a))
+
+### Code Style
+
+- Ruff format files.py + test_files.py ([#28](https://github.com/MagmaMoose/caldrith/pull/28),
+  [`a483e71`](https://github.com/MagmaMoose/caldrith/commit/a483e71a69fb6a5b723dfae356bfb3229a312398))
+
+### Features
+
+- **org**: Organization code-security configuration tier
+  ([#28](https://github.com/MagmaMoose/caldrith/pull/28),
+  [`a483e71`](https://github.com/MagmaMoose/caldrith/commit/a483e71a69fb6a5b723dfae356bfb3229a312398))
+
+
 ## v1.9.0 (2026-06-24)
 
 ### Chores
