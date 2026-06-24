@@ -2,6 +2,44 @@
 
 <!-- version list -->
 
+## v1.11.0 (2026-06-24)
+
+### Bug Fixes
+
+- **reconcile**: Paginate apps.list_installations + audit-log auth fails
+  ([#30](https://github.com/MagmaMoose/caldrith/pull/30),
+  [`5a195e5`](https://github.com/MagmaMoose/caldrith/commit/5a195e55910f7cbad0a78bfbb34762fb93c75592))
+
+- **tests**: Import CodeScanningDefaultSetup in test_schema.py
+  ([#30](https://github.com/MagmaMoose/caldrith/pull/30),
+  [`5a195e5`](https://github.com/MagmaMoose/caldrith/commit/5a195e55910f7cbad0a78bfbb34762fb93c75592))
+
+- **worker**: Use hour axis when RECONCILE_CRON_MINUTES >= 60
+  ([#30](https://github.com/MagmaMoose/caldrith/pull/30),
+  [`5a195e5`](https://github.com/MagmaMoose/caldrith/commit/5a195e55910f7cbad0a78bfbb34762fb93c75592))
+
+### Chores
+
+- Update caldrith image
+  ([`65a1dc9`](https://github.com/MagmaMoose/caldrith/commit/65a1dc9deffe1cb1498e519e35a7582e451c04ad))
+
+### Features
+
+- **api,worker**: Manual /reconcile endpoint + periodic re-reconcile cron
+  ([#30](https://github.com/MagmaMoose/caldrith/pull/30),
+  [`5a195e5`](https://github.com/MagmaMoose/caldrith/commit/5a195e55910f7cbad0a78bfbb34762fb93c75592))
+
+- **api,worker**: Manual reconcile endpoint + periodic re-reconcile cron
+  ([#30](https://github.com/MagmaMoose/caldrith/pull/30),
+  [`5a195e5`](https://github.com/MagmaMoose/caldrith/commit/5a195e55910f7cbad0a78bfbb34762fb93c75592))
+
+### Refactoring
+
+- **tests**: Single import style for caldrith.api.app
+  ([#30](https://github.com/MagmaMoose/caldrith/pull/30),
+  [`5a195e5`](https://github.com/MagmaMoose/caldrith/commit/5a195e55910f7cbad0a78bfbb34762fb93c75592))
+
+
 ## v1.10.0 (2026-06-24)
 
 ### Chores
