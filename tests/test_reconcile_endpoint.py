@@ -13,7 +13,6 @@ from githubkit import GitHub
 
 import caldrith.api.app as app_module
 import caldrith.api.reconcile as reconcile_module
-from caldrith.api.app import create_app
 
 _TOKEN = "secret-trigger-token"
 
@@ -66,7 +65,7 @@ def client(monkeypatch: pytest.MonkeyPatch, _fake_connections: FakeArqPool) -> T
     from caldrith.settings import get_config
 
     get_config.cache_clear()
-    app = create_app()
+    app = app_module.create_app()
     with TestClient(app) as c:
         c.fake_arq = _fake_connections  # type: ignore[attr-defined]
         yield c
@@ -79,7 +78,7 @@ def test_disabled_when_token_unset(monkeypatch: pytest.MonkeyPatch) -> None:
     from caldrith.settings import get_config
 
     get_config.cache_clear()
-    app = create_app()
+    app = app_module.create_app()
     with TestClient(app) as c:
         resp = c.post("/reconcile", headers={"Authorization": f"Bearer {_TOKEN}"})
     assert resp.status_code == 404
