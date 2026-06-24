@@ -7,6 +7,7 @@ from typing import Any
 import fakeredis.aioredis
 
 from caldrith.worker.queue import (
+    ARQ_QUEUE_NAME,
     dedup_delivery,
     enqueue_reconcile_installation,
     enqueue_reconcile_repo,
@@ -44,7 +45,12 @@ class _RecordingPool:
 async def test_enqueue_installation() -> None:
     pool = _RecordingPool()
     await enqueue_reconcile_installation(pool, installation_id=1, owner="acme")
-    assert pool.jobs == [("reconcile_installation", {"installation_id": 1, "owner": "acme"})]
+    assert pool.jobs == [
+        (
+            "reconcile_installation",
+            {"installation_id": 1, "owner": "acme", "_queue_name": ARQ_QUEUE_NAME},
+        )
+    ]
 
 
 async def test_enqueue_repo_dry_run() -> None:
@@ -60,4 +66,15 @@ async def test_enqueue_repo_dry_run() -> None:
         "repo": "widget",
         "dry_run": True,
         "head_sha": "sha",
+        "_queue_name": ARQ_QUEUE_NAME,
     }
+
+
+async def test_every_enqueue_targets_caldrith_queue() -> None:
+    """Regression guard: jobs must NOT land on ARQ's shared default ``arq:queue`` —
+    a co-tenant ARQ worker on the same Redis would otherwise steal and fail them."""
+    pool = _RecordingPool()
+    await enqueue_reconcile_installation(pool, installation_id=1, owner="acme")
+    await enqueue_reconcile_repo(pool, installation_id=1, owner="acme", repo="widget")
+    assert ARQ_QUEUE_NAME != "arq:queue"
+    assert all(kwargs["_queue_name"] == ARQ_QUEUE_NAME for _, kwargs in pool.jobs)

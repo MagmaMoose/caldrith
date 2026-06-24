@@ -12,6 +12,7 @@ import httpx
 import respx
 from githubkit import GitHub
 
+from caldrith.worker.queue import ARQ_QUEUE_NAME
 from caldrith.worker.worker import reconcile_installation
 
 
@@ -129,5 +130,32 @@ async def test_organization_block_enqueues_org_reconcile() -> None:
 
     assert count == 0  # no repo-scoped tier declared
     assert [name for name, _ in redis.jobs] == ["reconcile_org"]
-    assert redis.jobs[0][1] == {"installation_id": 42, "owner": "acme"}
+    assert redis.jobs[0][1] == {
+        "installation_id": 42,
+        "owner": "acme",
+        "_queue_name": ARQ_QUEUE_NAME,
+    }
     assert not repos_route.called
+
+
+@respx.mock
+async def test_repo_fan_out_targets_caldrith_queue() -> None:
+    # Every fanned-out reconcile_repo job must carry the Caldrith queue name, or a
+    # co-tenant ARQ worker on the shared Redis steals and fails it ("function not found").
+    _mock_settings("labels:\n  - name: bug\n")  # a repo-scoped tier → triggers fan-out
+    _mock_repos(("widget", False))
+    redis = _FakeArqRedis()
+    ctx = {"client_factory": _FakeFactory(GitHub("token")), "redis": redis}
+
+    await reconcile_installation(ctx, installation_id=42, owner="acme")
+
+    assert redis.jobs, "expected at least one fanned-out reconcile_repo"
+    assert all(kwargs["_queue_name"] == ARQ_QUEUE_NAME for _, kwargs in redis.jobs)
+
+
+def test_worker_consumes_the_caldrith_queue() -> None:
+    # Consumer side of the same contract: the worker must NOT poll ARQ's shared default.
+    from caldrith.worker.worker import WorkerSettings
+
+    assert WorkerSettings.queue_name == ARQ_QUEUE_NAME
+    assert WorkerSettings.queue_name != "arq:queue"

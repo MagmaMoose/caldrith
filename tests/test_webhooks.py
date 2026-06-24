@@ -15,6 +15,7 @@ from fastapi.testclient import TestClient
 
 import caldrith.api.app as app_module
 from caldrith.api.app import create_app
+from caldrith.worker.queue import ARQ_QUEUE_NAME
 
 
 class FakeArqPool:
@@ -114,7 +115,12 @@ def test_push_to_admin_default_branch_enqueues_full_sync(client: TestClient) -> 
     resp = _post(client, payload, event="push", delivery="push-1")
     assert resp.status_code == 202
     jobs = client.fake_arq.jobs  # type: ignore[attr-defined]
-    assert jobs == [("reconcile_installation", {"installation_id": 42, "owner": "acme"})]
+    assert jobs == [
+        (
+            "reconcile_installation",
+            {"installation_id": 42, "owner": "acme", "_queue_name": ARQ_QUEUE_NAME},
+        )
+    ]
 
 
 def test_push_to_non_admin_repo_ignored(client: TestClient) -> None:
@@ -248,7 +254,7 @@ def test_org_ruleset_drift_reconciles_org(client: TestClient) -> None:
     resp = _post(client, payload, event="repository_ruleset", delivery="rs-org")
     assert resp.status_code == 202
     assert client.fake_arq.jobs == [  # type: ignore[attr-defined]
-        ("reconcile_org", {"installation_id": 42, "owner": "acme"})
+        ("reconcile_org", {"installation_id": 42, "owner": "acme", "_queue_name": ARQ_QUEUE_NAME})
     ]
 
 
