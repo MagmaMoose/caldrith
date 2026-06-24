@@ -7,13 +7,30 @@ import yaml
 from pydantic import ValidationError
 
 from caldrith.config.schema import (
-    CodeScanningDefaultSetup,
+    CodeSecurityConfiguration,
     RepositorySettings,
     RestrictedRepos,
     SafeSettingsConfig,
     SubOrg,
     config_json_schema,
 )
+
+
+def test_code_security_configuration_validates() -> None:
+    CodeSecurityConfiguration(
+        name="Baseline",
+        dependency_graph_autosubmit_action="enabled",
+        dependabot_delegated_alert_dismissal="enabled",
+        enforcement="enforced",
+        apply_to="all_repos",
+        default_for_new_repos="all",
+    )
+    with pytest.raises(ValidationError):
+        CodeSecurityConfiguration(name="x", dependabot_alerts="on")  # not enabled|disabled|not_set
+    with pytest.raises(ValidationError):
+        CodeSecurityConfiguration(name="x", apply_to="some_repos")  # only all_repos
+    with pytest.raises(ValidationError):
+        CodeSecurityConfiguration(name="x", default_for_new_repos="everything")
 
 
 def test_suborg_visibility_parses_and_validates() -> None:

@@ -532,12 +532,95 @@ class OrgCustomPropertyDefinition(BaseModel):
     allowed_values: list[str] | None = None
 
 
+_CODE_SECURITY_STATUS = {"enabled", "disabled", "not_set"}
+_CODE_SECURITY_TOGGLES = (
+    "advanced_security",
+    "dependency_graph",
+    "dependency_graph_autosubmit_action",
+    "dependabot_alerts",
+    "dependabot_security_updates",
+    "dependabot_delegated_alert_dismissal",
+    "code_scanning_default_setup",
+    "code_scanning_delegated_alert_dismissal",
+    "secret_scanning",
+    "secret_scanning_push_protection",
+    "secret_scanning_non_provider_patterns",
+    "secret_scanning_validity_checks",
+    "secret_scanning_delegated_alert_dismissal",
+    "private_vulnerability_reporting",
+)
+
+
+class CodeSecurityConfiguration(BaseModel):
+    """An organization **code-security configuration** (the modern org-wide security knob).
+
+    Mirrors ``POST``/``PATCH /orgs/{org}/code-security/configurations``; reconciled by
+    ``name`` (created if absent, updated on drift). Each toggle takes ``enabled`` /
+    ``disabled`` / ``not_set``. This is the only API path for a few settings with no
+    per-repo equivalent — ``dependency_graph_autosubmit_action`` ("automatic dependency
+    submission") and ``dependabot_delegated_alert_dismissal`` ("prevent direct alert
+    dismissals"). The caldrith-only ``apply_to`` / ``default_for_new_repos`` keys (not part
+    of the API config body) attach the configuration to repos and set it as the default for
+    new repos after a create/update.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str
+    description: str | None = None
+
+    advanced_security: str | None = None
+    dependency_graph: str | None = None
+    dependency_graph_autosubmit_action: str | None = None
+    dependency_graph_autosubmit_action_options: dict[str, Any] | None = None
+    dependabot_alerts: str | None = None
+    dependabot_security_updates: str | None = None
+    dependabot_delegated_alert_dismissal: str | None = None
+    code_scanning_default_setup: str | None = None
+    code_scanning_delegated_alert_dismissal: str | None = None
+    secret_scanning: str | None = None
+    secret_scanning_push_protection: str | None = None
+    secret_scanning_non_provider_patterns: str | None = None
+    secret_scanning_validity_checks: str | None = None
+    secret_scanning_delegated_alert_dismissal: str | None = None
+    private_vulnerability_reporting: str | None = None
+    enforcement: str | None = None  # enforced | unenforced
+
+    # caldrith-only (NOT part of the API config body):
+    apply_to: str | None = None  # "all_repos" -> attach with scope=all
+    default_for_new_repos: str | None = None  # all | none | private_and_internal | public
+
+    @model_validator(mode="after")
+    def _check(self) -> CodeSecurityConfiguration:
+        for field in _CODE_SECURITY_TOGGLES:
+            value = getattr(self, field)
+            if value is not None and value not in _CODE_SECURITY_STATUS:
+                raise ValueError(
+                    f"code_security_configuration.{field} must be one of "
+                    f"{sorted(_CODE_SECURITY_STATUS)}"
+                )
+        if self.enforcement is not None and self.enforcement not in {"enforced", "unenforced"}:
+            raise ValueError(
+                "code_security_configuration.enforcement must be enforced | unenforced"
+            )
+        if self.apply_to is not None and self.apply_to != "all_repos":
+            raise ValueError("code_security_configuration.apply_to must be 'all_repos'")
+        defaults = {"all", "none", "private_and_internal", "public"}
+        if self.default_for_new_repos is not None and self.default_for_new_repos not in defaults:
+            raise ValueError(
+                "code_security_configuration.default_for_new_repos must be one of "
+                f"{sorted(defaults)}"
+            )
+        return self
+
+
 class OrganizationSettings(BaseModel):
     """The ``organization:`` block — applied once per Organization installation.
 
     Scalar fields map to ``orgs.update`` (``PATCH /orgs/{org}``) and are diffed/applied
     generically. The nested ``actions`` / ``interaction_limits`` /
-    ``custom_property_definitions`` / ``rulesets`` are reconciled via their own endpoints.
+    ``custom_property_definitions`` / ``rulesets`` / ``code_security_configuration`` are
+    reconciled via their own endpoints.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -581,6 +664,7 @@ class OrganizationSettings(BaseModel):
     interaction_limits: InteractionLimits | None = None
     custom_property_definitions: list[OrgCustomPropertyDefinition] | None = None
     rulesets: list[Ruleset] | None = None
+    code_security_configuration: CodeSecurityConfiguration | None = None
 
 
 # ---------------------------------------------------------------------------
