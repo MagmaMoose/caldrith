@@ -47,6 +47,13 @@ spec:
           envFrom:
             - secretRef:
                 name: caldrith
+            # MANUAL_TRIGGER_TOKEN guards POST /reconcile. It lives in its OWN
+            # ExternalSecret (see externalsecret-manual-trigger.yaml) and is marked
+            # optional so a missing vault entry leaves the endpoint disabled (404)
+            # instead of blocking pod startup or the core App credentials.
+            - secretRef:
+                name: caldrith-manual-trigger
+                optional: true
           env:
             # In-cluster Valkey, no auth — not a secret, so set here, not in Vault.
             - name: REDIS_URL
