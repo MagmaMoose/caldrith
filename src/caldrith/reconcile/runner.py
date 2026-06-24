@@ -25,6 +25,7 @@ from caldrith.reconcile import (
     actions,
     autolinks,
     branch,
+    code_scanning,
     collaborators,
     custom_properties,
     environments,
@@ -58,6 +59,7 @@ _CHECK_NAME = "caldrith/settings"
 REPO_TIERS: list[RepoTier] = [
     repository.TIER,
     security.TIER,
+    code_scanning.TIER,
     topics.TIER,
     labels.TIER,
     milestones.TIER,

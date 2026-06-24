@@ -41,6 +41,13 @@ def test_suborg_visibility_parses_and_validates() -> None:
         SubOrg(name="typo", visibility=["pubic"])  # unknown visibility rejected
 
 
+def test_code_scanning_state_validates() -> None:
+    CodeScanningDefaultSetup(state="configured")  # ok
+    CodeScanningDefaultSetup(state="not-configured", query_suite="extended", languages=["python"])
+    with pytest.raises(ValidationError):
+        CodeScanningDefaultSetup(state="on")  # invalid state rejected
+
+
 def test_three_required_fields_parse() -> None:
     cfg = SafeSettingsConfig.model_validate(
         {

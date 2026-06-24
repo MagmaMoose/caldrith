@@ -253,6 +253,12 @@ class ManagedFile(BaseModel):
     an existing one (right for per-repo-customised files like a release workflow);
     the default keeps the file in sync with ``content`` (right for a uniform gate).
 
+    ``upgrade_only`` makes the sync **never downgrade** a SHA-pinned action: if the target
+    repo pins any action the file declares (``uses: owner/repo@<sha> # vX.Y.Z``) at a
+    *newer* version than this ``content`` — i.e. Dependabot / Renovate has bumped it — the
+    file is left as-is instead of reverted. (Without it, a bot bump looks like drift and
+    is overwritten back to the baseline.)
+
     ``skip_repos`` is a list of repo-name globs to exclude from THIS file only — a
     per-file escape hatch that, unlike ``restrictedRepos``, leaves the repo under all
     other Caldrith management.
@@ -263,6 +269,7 @@ class ManagedFile(BaseModel):
     path: str
     content: str
     create_only: bool = False
+    upgrade_only: bool = False
     skip_repos: list[str] | None = None
 
 
@@ -421,6 +428,30 @@ class PagesConfig(BaseModel):
     https_enforced: bool | None = None
 
 
+class CodeScanningDefaultSetup(BaseModel):
+    """CodeQL **default setup** — code scanning without a committed workflow file.
+
+    Enabled via the API rather than a workflow; free on public repos, but on
+    private/internal repos it needs GitHub Code Security (the update 403/422s without it,
+    isolated per tier). ``state`` mirrors the API; ``query_suite`` and ``languages`` are
+    optional refinements — omit ``languages`` to let GitHub auto-detect.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    state: str  # configured | not-configured
+    query_suite: str | None = None  # default | extended
+    languages: list[str] | None = None
+    runner_type: str | None = None  # standard | labeled
+    runner_label: str | None = None
+
+    @model_validator(mode="after")
+    def _check_state(self) -> CodeScanningDefaultSetup:
+        if self.state not in {"configured", "not-configured"}:
+            raise ValueError("code_scanning.state must be 'configured' or 'not-configured'")
+        return self
+
+
 # ---------------------------------------------------------------------------
 # Repository-scoped tier container (reused by overlays)
 # ---------------------------------------------------------------------------
@@ -456,6 +487,7 @@ class RepoScoped(BaseModel):
     secrets: SecretsConfig | None = None
     environments: list[Environment] | None = None
     pages: PagesConfig | None = None
+    code_scanning: CodeScanningDefaultSetup | None = None
 
 
 class RestrictedRepos(BaseModel):

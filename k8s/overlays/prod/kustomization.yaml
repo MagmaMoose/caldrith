@@ -5,4 +5,4 @@ resources:
   - ../../base
 images:
   - name: ghcr.io/magmamoose/caldrith
-    newTag: v1.7.0 # {"$imagepolicy": "flux-system:caldrith:tag"}
+    newTag: v1.9.0 # {"$imagepolicy": "flux-system:caldrith:tag"}
