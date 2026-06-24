@@ -15,6 +15,7 @@ Resolving installations:
 from __future__ import annotations
 
 import hmac
+import json
 from typing import Any
 
 from fastapi import APIRouter, Header, HTTPException, Request
@@ -25,6 +26,7 @@ from caldrith.audit.logging import get_logger
 from caldrith.auth.client import GitHubClientFactory
 from caldrith.github_json import response_json
 from caldrith.settings import get_config
+from caldrith.worker.installations import paginate_installations
 from caldrith.worker.queue import enqueue_reconcile_installation
 
 router = APIRouter(tags=["reconcile"])
@@ -45,20 +47,31 @@ async def trigger_reconcile(
 ) -> dict[str, Any]:
     """Enqueue ``reconcile_installation`` for one or every installation."""
     config = get_config()
+    client_ip = request.client.host if request.client else None
     if not config.manual_trigger_token:
         # Endpoint disabled — same response as a missing route, so its existence isn't
         # advertised when the token is unset.
         raise HTTPException(status_code=HTTP_404_NOT_FOUND)
     if not _check_token(authorization, config.manual_trigger_token):
+        # Audit failed token attempts: this endpoint is the only break-glass auth surface,
+        # so probing should be visible. The token itself is never logged.
+        _log.warning(
+            "manual.reconcile.auth_failed",
+            ip=client_ip,
+            reason="missing_or_bad_bearer",
+        )
         raise HTTPException(status_code=HTTP_401_UNAUTHORIZED, detail="invalid bearer token")
 
+    raw = await request.body()
     body: dict[str, Any] = {}
-    if request.headers.get("content-length", "0") != "0":
+    if raw:
         try:
-            body = await request.json()
+            parsed = json.loads(raw)
         except ValueError:
-            body = {}
-    owner = body.get("owner") if isinstance(body, dict) else None
+            parsed = {}
+        if isinstance(parsed, dict):
+            body = parsed
+    owner = body.get("owner")
 
     factory = GitHubClientFactory(config)
     arq_redis = request.app.state.arq_redis
@@ -91,5 +104,5 @@ async def _installations_for(
                     return []
                 raise
             return [(installation["id"], installation["account"]["login"])]
-        installations = response_json(await client.rest.apps.async_list_installations())
+        installations = await paginate_installations(client)
         return [(i["id"], i["account"]["login"]) for i in installations]

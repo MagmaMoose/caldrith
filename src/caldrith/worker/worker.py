@@ -21,13 +21,13 @@ from arq.cron import cron
 from caldrith.audit.logging import bind_context, configure_logging, get_logger
 from caldrith.auth.client import GitHubClientFactory
 from caldrith.config.loader import load_admin_config
-from caldrith.github_json import response_json
 from caldrith.reconcile.org import run_org_reconcile
 from caldrith.reconcile.overlay import has_overlays
 from caldrith.reconcile.planner import list_target_repos
 from caldrith.reconcile.runner import REPO_TIERS, run_reconcile
 from caldrith.reconcile.selection import select_targets
 from caldrith.settings import get_config
+from caldrith.worker.installations import paginate_installations
 
 _log = get_logger(__name__)
 
@@ -136,7 +136,7 @@ async def reconcile_all_installations(ctx: dict[str, Any]) -> int:
     """
     factory: GitHubClientFactory = ctx["client_factory"]
     async with factory.for_app() as client:
-        installations = response_json(await client.rest.apps.async_list_installations())
+        installations = await paginate_installations(client)
     arq_redis = ctx["redis"]
     for installation in installations:
         await arq_redis.enqueue_job(
