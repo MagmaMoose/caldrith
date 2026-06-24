@@ -161,18 +161,29 @@ async def shutdown(ctx: dict[str, Any]) -> None:
 
 
 def _cron_jobs() -> list[Any]:
-    """Build the cron-jobs list from ``RECONCILE_CRON_MINUTES`` (0 disables)."""
+    """Build the cron-jobs list from ``RECONCILE_CRON_MINUTES`` (0 disables).
+
+    Sub-hour cadences (``minutes < 60``) drive ``minute=`` directly. For ``minutes >=
+    60`` we switch to ``hour=`` with ``hours = minutes // 60`` so a value like 120 fires
+    every two hours, not hourly. Non-multiples-of-60 above an hour floor to the next
+    whole hour (e.g. ``minutes=90`` runs hourly); values inside an hour that don't
+    divide 60 fire at every multiple within the hour, then wrap.
+    """
     minutes = get_config().reconcile_cron_minutes if _has_config_env() else 0
     if minutes <= 0:
         return []
-    every_n = {m for m in range(0, 60, minutes)} if minutes < 60 else {0}
+    cron_kwargs: dict[str, Any]
+    if minutes < 60:
+        cron_kwargs = {"minute": set(range(0, 60, minutes))}
+    else:
+        cron_kwargs = {"hour": set(range(0, 24, minutes // 60)), "minute": {0}}
     return [
         cron(
             reconcile_all_installations,
             name="reconcile-all-installations",
-            minute=every_n,
             unique=True,
             max_tries=1,
+            **cron_kwargs,
         )
     ]
 

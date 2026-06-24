@@ -74,3 +74,17 @@ def test_cron_jobs_enabled_with_every_n_minutes(monkeypatch: pytest.MonkeyPatch)
     # ARQ CronJob exposes the minute set we configured (every 15 minutes -> 0/15/30/45).
     assert jobs[0].minute == {0, 15, 30, 45}
     get_config.cache_clear()
+
+
+def test_cron_jobs_multi_hour_uses_hour_axis(monkeypatch: pytest.MonkeyPatch) -> None:
+    # >= 60 must drive `hour=` (not `minute=`); else 120/720/1440 silently collapse
+    # to hourly@:00. 120 -> every 2 hours at minute 0.
+    monkeypatch.setenv("RECONCILE_CRON_MINUTES", "120")
+    from caldrith.settings import get_config
+
+    get_config.cache_clear()
+    jobs = _cron_jobs()
+    assert len(jobs) == 1
+    assert jobs[0].hour == {0, 2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 22}
+    assert jobs[0].minute == {0}
+    get_config.cache_clear()

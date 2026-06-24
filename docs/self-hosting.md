@@ -41,7 +41,7 @@ example a Kubernetes env populated by an OCI Vault `ExternalSecret`).
 | `CONFIG_PATH` | `.github` | Directory holding the settings file. |
 | `SETTINGS_FILE_PATH` | `settings.yml` | The settings file name. |
 | `MANUAL_TRIGGER_TOKEN` | — | Bearer token guarding `POST /reconcile`. Unset disables the endpoint (it returns 404). Set to a long random string to enable on-demand reconciles. |
-| `RECONCILE_CRON_MINUTES` | `0` | Periodic full reconcile across every installation, every N minutes (`0` disables). Belt-and-braces against missed webhooks. |
+| `RECONCILE_CRON_MINUTES` | `0` | Periodic full reconcile across every installation, every N minutes (`0` disables). Values `<60` schedule sub-hourly (e.g. `15` → minutes 0/15/30/45). Values `>=60` schedule by the hour using `minutes // 60` (e.g. `120` → every 2h at :00). Belt-and-braces against missed webhooks. |
 | `CALDRITH_SECRET_<NAME>` | — | Value for a declared `secrets:` entry `<NAME>` (used to create a missing repo secret; never read back from GitHub). |
 
 !!! danger "Never put secrets in the repo"
