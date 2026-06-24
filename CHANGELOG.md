@@ -2,6 +2,24 @@
 
 <!-- version list -->
 
+## v1.11.1 (2026-06-24)
+
+### Bug Fixes
+
+- **k8s**: Suppress KICS false positive on ExternalSecret secretKey
+  ([#31](https://github.com/MagmaMoose/caldrith/pull/31),
+  [`8b9fc53`](https://github.com/MagmaMoose/caldrith/commit/8b9fc534052a83b036d8a2da1eef07c9a41bace0))
+
+### Chores
+
+- Update caldrith image
+  ([`519df47`](https://github.com/MagmaMoose/caldrith/commit/519df47f8c6fd71d75745d59745701e4f6a95817))
+
+- **k8s**: Enable hourly reconcile cron + wire manual-trigger token
+  ([#31](https://github.com/MagmaMoose/caldrith/pull/31),
+  [`8b9fc53`](https://github.com/MagmaMoose/caldrith/commit/8b9fc534052a83b036d8a2da1eef07c9a41bace0))
+
+
 ## v1.11.0 (2026-06-24)
 
 ### Bug Fixes
