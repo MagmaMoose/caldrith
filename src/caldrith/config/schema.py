@@ -253,6 +253,12 @@ class ManagedFile(BaseModel):
     an existing one (right for per-repo-customised files like a release workflow);
     the default keeps the file in sync with ``content`` (right for a uniform gate).
 
+    ``upgrade_only`` makes the sync **never downgrade** a SHA-pinned action: if the target
+    repo pins any action the file declares (``uses: owner/repo@<sha> # vX.Y.Z``) at a
+    *newer* version than this ``content`` — i.e. Dependabot / Renovate has bumped it — the
+    file is left as-is instead of reverted. (Without it, a bot bump looks like drift and
+    is overwritten back to the baseline.)
+
     ``skip_repos`` is a list of repo-name globs to exclude from THIS file only — a
     per-file escape hatch that, unlike ``restrictedRepos``, leaves the repo under all
     other Caldrith management.
@@ -263,6 +269,7 @@ class ManagedFile(BaseModel):
     path: str
     content: str
     create_only: bool = False
+    upgrade_only: bool = False
     skip_repos: list[str] | None = None
 
 
