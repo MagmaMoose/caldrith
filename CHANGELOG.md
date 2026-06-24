@@ -2,6 +2,32 @@
 
 <!-- version list -->
 
+## v1.8.0 (2026-06-24)
+
+### Chores
+
+- Provision required workflows (caldrith) ([#27](https://github.com/MagmaMoose/caldrith/pull/27),
+  [`c8fb484`](https://github.com/MagmaMoose/caldrith/commit/c8fb484c4d8faa9f5f5d928b3e02b51b23e5ba6c))
+
+- Update caldrith image
+  ([`606be5a`](https://github.com/MagmaMoose/caldrith/commit/606be5a90340ddc883d4da09f62fc85cf8f7e6ec))
+
+### Code Style
+
+- Ruff format files.py and test_files.py ([#26](https://github.com/MagmaMoose/caldrith/pull/26),
+  [`6dce776`](https://github.com/MagmaMoose/caldrith/commit/6dce7766a702f810076e321051b20ab980449a19))
+
+### Features
+
+- **code-scanning**: CodeQL default-setup tier + maximal public-hardening guide
+  ([#26](https://github.com/MagmaMoose/caldrith/pull/26),
+  [`6dce776`](https://github.com/MagmaMoose/caldrith/commit/6dce7766a702f810076e321051b20ab980449a19))
+
+- **code-scanning**: Tier to enable CodeQL default setup
+  ([#26](https://github.com/MagmaMoose/caldrith/pull/26),
+  [`6dce776`](https://github.com/MagmaMoose/caldrith/commit/6dce7766a702f810076e321051b20ab980449a19))
+
+
 ## v1.7.0 (2026-06-23)
 
 ### Chores
