@@ -15,6 +15,9 @@ Idempotent and non-destructive:
 - ``create_only`` files are written only when absent (never overwrite a repo's own),
   and a ``.yml``/``.yaml`` sibling counts as present — so a managed ``release.yaml``
   won't be added next to a repo's existing ``release.yml``.
+- ``upgrade_only`` files are never *downgraded*: if the repo pins a declared action
+  (``uses: owner/repo@<sha> # vX.Y.Z``) at a newer version than ``content`` (e.g. a
+  Dependabot / Renovate bump), the file is left as-is instead of reverted.
 - ``skip_repos`` globs exclude a file from specific repos (a per-file escape hatch).
 - An empty repo (no commit on its default branch) is skipped gracefully — there is
   nothing to branch a PR from yet.
@@ -35,6 +38,7 @@ Idempotent and non-destructive:
 from __future__ import annotations
 
 import base64
+import re
 from dataclasses import dataclass, field
 
 from githubkit import GitHub
@@ -83,6 +87,37 @@ def _sibling_ext_path(path: str) -> str | None:
 def _b64(text: str) -> str:
     """Base64-encode ``text`` (the encoding GitHub's file-content APIs expect)."""
     return base64.b64encode(text.encode()).decode()
+
+
+# A SHA-pinned action with a version comment: ``uses: owner/repo@<40-hex> # vX.Y[.Z]`` —
+# the org's pin convention. The trailing ``# vX.Y.Z`` is what Dependabot / Renovate bump.
+_PIN_RE = re.compile(r"uses:\s*([\w.-]+/[\w.-]+)@[0-9a-fA-F]{40}\s*#\s*v?(\d+(?:\.\d+){1,2})")
+
+
+def _semver(version: str) -> tuple[int, int, int]:
+    """``"2.1"`` / ``"2.1.0"`` -> ``(2, 1, 0)`` for ordering."""
+    parts = [int(p) for p in version.split(".")]
+    major, minor, patch, *_ = (*parts, 0, 0)
+    return major, minor, patch
+
+
+def _action_versions(content: str) -> dict[str, tuple[int, int, int]]:
+    """Map ``owner/repo`` -> pinned semver for each SHA-pinned ``uses:`` line."""
+    return {action: _semver(version) for action, version in _PIN_RE.findall(content)}
+
+
+def _repo_is_ahead(repo_content: str, admin_content: str) -> bool:
+    """True if the repo pins any of the admin file's actions at a *newer* version.
+
+    Overwriting would then downgrade that pin — which is exactly what happens after
+    Dependabot / Renovate bumps a SHA-pinned action past the admin baseline. Only actions
+    the admin file declares are compared, so extra actions a repo adds are ignored.
+    """
+    repo_pins = _action_versions(repo_content)
+    return any(
+        action in repo_pins and repo_pins[action] > admin_version
+        for action, admin_version in _action_versions(admin_content).items()
+    )
 
 
 @dataclass
@@ -353,6 +388,8 @@ class FileProvisioner:
                     continue  # a .yml/.yaml variant already exists — don't duplicate it
                 needed.append(managed)  # absent -> create
             elif content != managed.content and not managed.create_only:
+                if managed.upgrade_only and _repo_is_ahead(content, managed.content):
+                    continue  # a bot bumped a pinned version past the baseline — don't downgrade
                 needed.append(managed)  # drifted -> update (create_only files are left alone)
 
         orphans = await self._orphans(target, default_branch, desired)

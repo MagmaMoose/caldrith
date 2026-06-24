@@ -12,8 +12,14 @@ from githubkit import GitHub
 from githubkit.exception import RequestFailed
 
 from caldrith.config.schema import ManagedFile
-from caldrith.reconcile.files import FileProvisioner
+from caldrith.reconcile.files import FileProvisioner, _repo_is_ahead
 from caldrith.reconcile.planner import TargetRepo
+
+
+def _wf(action: str, version: str, sha: str = "a" * 40) -> str:
+    """A tiny workflow file pinning one SHA-pinned action with a ``# vX.Y.Z`` comment."""
+    return f"name: W\njobs:\n  j:\n    steps:\n      - uses: {action}@{sha} # v{version}\n"
+
 
 _REPO = "https://api.github.com/repos/acme/widget"
 _PATH = ".github/workflows/security.yml"
@@ -563,3 +569,71 @@ async def test_prune_skips_orphan_already_absent_on_branch() -> None:
 
     assert not commit.called  # orphan already absent + security staged -> empty changeset
     assert result.applied is True
+
+
+def test_repo_is_ahead_compares_pinned_action_versions() -> None:
+    admin = _wf("magmamoose/chargate", "2.1.0")
+    assert _repo_is_ahead(_wf("magmamoose/chargate", "2.2.0", "b" * 40), admin) is True
+    assert _repo_is_ahead(_wf("magmamoose/chargate", "2.0.0", "b" * 40), admin) is False
+    assert _repo_is_ahead(_wf("magmamoose/chargate", "2.1.0", "b" * 40), admin) is False  # equal
+    # an action the admin file doesn't declare is ignored
+    assert _repo_is_ahead(_wf("actions/checkout", "99.0.0", "b" * 40), admin) is False
+    assert _repo_is_ahead("name: W\n", admin) is False  # no pins
+
+
+@respx.mock
+async def test_upgrade_only_skips_when_repo_pin_is_ahead() -> None:
+    # Dependabot / Renovate bumped chargate in the repo past the admin baseline — caldrith
+    # must NOT revert it (no downgrade).
+    admin = _wf("magmamoose/chargate", "2.1.0")
+    _mock_repo()
+    respx.get(_CONTENTS, params={"ref": "main"}).mock(
+        return_value=_file(_wf("magmamoose/chargate", "2.2.0", "c" * 40))
+    )
+    _no_branch()
+    commit = _mock_commit()
+
+    managed = ManagedFile(path=_PATH, content=admin, upgrade_only=True)
+    async with GitHub("token") as client:
+        result = await FileProvisioner(client).apply(TargetRepo("acme", "widget"), [managed])
+
+    assert result.files == [] and result.changed is False
+    assert not commit.called  # nothing provisioned -> no commit, no downgrade PR
+
+
+@respx.mock
+async def test_upgrade_only_updates_when_repo_pin_is_behind() -> None:
+    admin = _wf("magmamoose/chargate", "2.2.0")
+    _mock_repo()
+    respx.get(_CONTENTS, params={"ref": "main"}).mock(
+        return_value=_file(_wf("magmamoose/chargate", "2.1.0", "c" * 40))
+    )
+    _no_branch()
+
+    managed = ManagedFile(path=_PATH, content=admin, upgrade_only=True)
+    async with GitHub("token") as client:
+        result = await FileProvisioner(client, dry_run=True).apply(
+            TargetRepo("acme", "widget"), [managed]
+        )
+
+    assert result.files == [_PATH]  # repo behind the baseline -> upgrade it
+
+
+@respx.mock
+async def test_upgrade_only_still_syncs_non_version_drift() -> None:
+    # Same pinned version, but the admin content changed elsewhere -> repo isn't "ahead",
+    # so the file is still synced (upgrade_only only guards against *downgrades*).
+    admin = _wf("magmamoose/chargate", "2.1.0") + "permissions:\n  contents: read\n"
+    _mock_repo()
+    respx.get(_CONTENTS, params={"ref": "main"}).mock(
+        return_value=_file(_wf("magmamoose/chargate", "2.1.0", "c" * 40))
+    )
+    _no_branch()
+
+    managed = ManagedFile(path=_PATH, content=admin, upgrade_only=True)
+    async with GitHub("token") as client:
+        result = await FileProvisioner(client, dry_run=True).apply(
+            TargetRepo("acme", "widget"), [managed]
+        )
+
+    assert result.files == [_PATH]  # same version, other drift -> sync
