@@ -2,6 +2,20 @@
 
 <!-- version list -->
 
+## v1.9.0 (2026-06-24)
+
+### Chores
+
+- Update caldrith image
+  ([`df86988`](https://github.com/MagmaMoose/caldrith/commit/df86988921a2325e0967ef3d3aae142e17065518))
+
+### Features
+
+- **files**: Upgrade_only — never downgrade a bot-bumped SHA-pinned version
+  ([#29](https://github.com/MagmaMoose/caldrith/pull/29),
+  [`cf4a733`](https://github.com/MagmaMoose/caldrith/commit/cf4a73316d51fefebc840b92de58d7e1e209f9a9))
+
+
 ## v1.8.0 (2026-06-24)
 
 ### Chores
