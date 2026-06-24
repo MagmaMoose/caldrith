@@ -7,6 +7,7 @@ import yaml
 from pydantic import ValidationError
 
 from caldrith.config.schema import (
+    CodeScanningDefaultSetup,
     CodeSecurityConfiguration,
     RepositorySettings,
     RestrictedRepos,

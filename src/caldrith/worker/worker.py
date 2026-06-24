@@ -16,6 +16,7 @@ import os
 from typing import Any, ClassVar
 
 from arq.connections import RedisSettings
+from arq.cron import cron
 
 from caldrith.audit.logging import bind_context, configure_logging, get_logger
 from caldrith.auth.client import GitHubClientFactory
@@ -26,6 +27,7 @@ from caldrith.reconcile.planner import list_target_repos
 from caldrith.reconcile.runner import REPO_TIERS, run_reconcile
 from caldrith.reconcile.selection import select_targets
 from caldrith.settings import get_config
+from caldrith.worker.installations import paginate_installations
 
 _log = get_logger(__name__)
 
@@ -124,6 +126,28 @@ async def reconcile_repo(
     return summary.any_changed
 
 
+async def reconcile_all_installations(ctx: dict[str, Any]) -> int:
+    """Periodic full reconcile: enqueue ``reconcile_installation`` for every install.
+
+    Belt-and-braces against missed webhooks (delivery failures, secret rotation, etc.):
+    one ``apps.list_installations`` call (via the App's JWT, no installation needed),
+    then a job per installation handled by the existing fan-out. Each enqueue is
+    idempotent at the reconcile layer — duplicate runs converge to a no-op.
+    """
+    factory: GitHubClientFactory = ctx["client_factory"]
+    async with factory.for_app() as client:
+        installations = await paginate_installations(client)
+    arq_redis = ctx["redis"]
+    for installation in installations:
+        await arq_redis.enqueue_job(
+            "reconcile_installation",
+            installation_id=installation["id"],
+            owner=installation["account"]["login"],
+        )
+    _log.info("reconcile_all_installations.enqueued", source="cron", count=len(installations))
+    return len(installations)
+
+
 async def startup(ctx: dict[str, Any]) -> None:
     """Worker startup: configure logging and a shared client factory."""
     configure_logging()
@@ -136,10 +160,50 @@ async def shutdown(ctx: dict[str, Any]) -> None:
     get_logger(__name__).info("worker.shutdown")
 
 
+def _cron_jobs() -> list[Any]:
+    """Build the cron-jobs list from ``RECONCILE_CRON_MINUTES`` (0 disables).
+
+    Sub-hour cadences (``minutes < 60``) drive ``minute=`` directly. For ``minutes >=
+    60`` we switch to ``hour=`` with ``hours = minutes // 60`` so a value like 120 fires
+    every two hours, not hourly. Non-multiples-of-60 above an hour floor to the next
+    whole hour (e.g. ``minutes=90`` runs hourly); values inside an hour that don't
+    divide 60 fire at every multiple within the hour, then wrap.
+    """
+    minutes = get_config().reconcile_cron_minutes if _has_config_env() else 0
+    if minutes <= 0:
+        return []
+    cron_kwargs: dict[str, Any]
+    if minutes < 60:
+        cron_kwargs = {"minute": set(range(0, 60, minutes))}
+    else:
+        cron_kwargs = {"hour": set(range(0, 24, minutes // 60)), "minute": {0}}
+    return [
+        cron(
+            reconcile_all_installations,
+            name="reconcile-all-installations",
+            unique=True,
+            max_tries=1,
+            **cron_kwargs,
+        )
+    ]
+
+
+def _has_config_env() -> bool:
+    """True when the secrets ``get_config()`` needs are present — so the module stays
+    importable by tooling/tests without env (mirrors the ``redis_settings`` rationale)."""
+    return all(os.environ.get(k) for k in ("APP_ID", "PRIVATE_KEY", "WEBHOOK_SECRET"))
+
+
 class WorkerSettings:
     """ARQ worker entrypoint (``arq caldrith.worker.worker.WorkerSettings``)."""
 
-    functions: ClassVar = [reconcile_installation, reconcile_repo, reconcile_org]
+    functions: ClassVar = [
+        reconcile_installation,
+        reconcile_repo,
+        reconcile_org,
+        reconcile_all_installations,
+    ]
+    cron_jobs: ClassVar = _cron_jobs()
     on_startup = startup
     on_shutdown = shutdown
     # ARQ reads settings off the class ``__dict__``, so ``redis_settings`` MUST be a
