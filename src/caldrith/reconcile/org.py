@@ -26,6 +26,7 @@ from caldrith.audit.logging import bind_context, get_logger
 from caldrith.config.diff import compare_deep
 from caldrith.config.loader import load_admin_config
 from caldrith.config.schema import (
+    CodeSecurityConfiguration,
     InteractionLimits,
     OrgActions,
     OrganizationSettings,
@@ -40,7 +41,13 @@ from caldrith.settings import AppConfig, get_config
 _log = get_logger(__name__)
 
 # Sub-tiers reconciled via their own endpoints, excluded from the orgs.update diff.
-_NESTED_FIELDS = {"actions", "interaction_limits", "custom_property_definitions", "rulesets"}
+_NESTED_FIELDS = {
+    "actions",
+    "interaction_limits",
+    "custom_property_definitions",
+    "rulesets",
+    "code_security_configuration",
+}
 
 
 @dataclass
@@ -266,6 +273,63 @@ async def _reconcile_rulesets(
     return result
 
 
+async def _reconcile_code_security_config(
+    client: GitHub, owner: str, cfg: CodeSecurityConfiguration, *, dry_run: bool
+) -> TierResult:
+    """Create/update the org code-security configuration (by ``name``) and apply it.
+
+    The configuration body is every declared field except the caldrith-only ``apply_to`` /
+    ``default_for_new_repos``. After a create or update (and only then, to avoid kicking an
+    attach job on every no-op reconcile) the configuration is attached to all repos
+    (``apply_to: all_repos``) and/or set as the default for new repos.
+    """
+    api = client.rest.code_security
+    result = TierResult(tier="org_code_security_configuration", scope=owner)
+    body = cfg.model_dump(exclude_none=True, exclude={"apply_to", "default_for_new_repos"})
+
+    configs = response_json(await api.async_get_configurations_for_org(org=owner)) or []
+    existing = next((c for c in configs if c.get("name") == cfg.name), None)
+
+    config_id = existing.get("id") if existing else None
+    touched = False
+    if existing is None:
+        result.changed = True
+        result.notes.append(f"create:{cfg.name}")
+        if not dry_run:
+            created = response_json(
+                await api.async_create_configuration(org=owner, data=body)  # type: ignore[arg-type]
+            )
+            config_id = created.get("id")
+        touched = True
+    elif any(existing.get(key) != value for key, value in body.items() if key != "name"):
+        result.changed = True
+        result.notes.append(f"update:{cfg.name}")
+        if not dry_run:
+            await api.async_update_configuration(
+                org=owner,
+                configuration_id=config_id,  # type: ignore[arg-type]
+                data=body,  # type: ignore[arg-type]
+            )
+        touched = True
+
+    if touched and cfg.apply_to == "all_repos":
+        result.notes.append("attach: all repos")
+        if not dry_run and config_id is not None:
+            await api.async_attach_configuration(
+                org=owner, configuration_id=config_id, data={"scope": "all"}
+            )
+    if touched and cfg.default_for_new_repos is not None:
+        result.notes.append(f"default for new repos: {cfg.default_for_new_repos}")
+        if not dry_run and config_id is not None:
+            await api.async_set_configuration_as_default(
+                org=owner,
+                configuration_id=config_id,
+                data={"default_for_new_repos": cfg.default_for_new_repos},
+            )
+    result.applied = result.changed and not dry_run
+    return result
+
+
 async def run_org_reconcile(
     client: GitHub,
     installation_id: int,
@@ -309,6 +373,12 @@ async def run_org_reconcile(
         )
     if org.rulesets:
         results.append(await _reconcile_rulesets(client, owner, org.rulesets, dry_run=dry_run))
+    if org.code_security_configuration is not None:
+        results.append(
+            await _reconcile_code_security_config(
+                client, owner, org.code_security_configuration, dry_run=dry_run
+            )
+        )
 
     for result in results:
         if result.changed:

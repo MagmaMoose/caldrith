@@ -1020,8 +1020,8 @@ The `organization:` block is applied **once per Organization installation** (it 
 graceful no-op on User accounts). Scalar fields map to `orgs.update`
 (`PATCH /orgs/{org}`) and are diffed/applied generically — profile, member
 privileges, and the security defaults for *new* repositories. The nested `actions`,
-`interaction_limits`, `custom_property_definitions`, and `rulesets` are reconciled
-via their own endpoints.
+`interaction_limits`, `custom_property_definitions`, `rulesets`, and
+`code_security_configuration` are reconciled via their own endpoints.
 
 ```yaml
 organization:
@@ -1136,6 +1136,70 @@ the drifted ones are written.
 | `default_value` | — | Default value (string or list). |
 | `description` | — | Human description of the property. |
 | `allowed_values` | — | Permitted values for select-type properties. |
+
+### `organization.code_security_configuration`
+
+GitHub's org **code-security configuration** is the modern, enforceable way to set
+Dependabot / secret-scanning / code-scanning / dependency-graph defaults across the org —
+and the **only** API path for a couple of settings with no per-repo equivalent. caldrith
+reconciles it by `name` (create if absent, update on drift), then — only after a create or
+update — attaches it and/or sets it as the default for new repos.
+
+```yaml
+organization:
+  code_security_configuration:
+    name: "MagmaMoose baseline"
+    dependency_graph: enabled
+    dependency_graph_autosubmit_action: enabled     # "Automatic dependency submission"
+    dependabot_alerts: enabled
+    dependabot_security_updates: enabled
+    dependabot_delegated_alert_dismissal: enabled   # "Prevent direct alert dismissals"
+    secret_scanning: enabled
+    secret_scanning_push_protection: enabled
+    private_vulnerability_reporting: enabled
+    enforcement: enforced
+    apply_to: all_repos            # attach to all repos (scope=all)
+    default_for_new_repos: all     # set as the default for new repos
+```
+
+**Fields** — every toggle takes `enabled` | `disabled` | `not_set`; `apply_to` /
+`default_for_new_repos` are caldrith-only (not sent in the API body).
+
+| Key | Default | Purpose |
+| --- | --- | --- |
+| `name` | required | Configuration name; the create/update match key. |
+| `description` | — | Human description. |
+| `advanced_security` | — | GitHub Advanced Security. |
+| `dependency_graph` | — | Dependency graph. |
+| `dependency_graph_autosubmit_action` | — | **Automatic dependency submission** (needs `dependency_graph: enabled`). |
+| `dependency_graph_autosubmit_action_options` | — | Passthrough dict, e.g. `{labeled_runners: true}`. |
+| `dependabot_alerts` | — | Dependabot alerts. |
+| `dependabot_security_updates` | — | Dependabot security updates. |
+| `dependabot_delegated_alert_dismissal` | — | **Prevent direct alert dismissals** (needs `dependabot_alerts: enabled`). |
+| `code_scanning_default_setup` | — | CodeQL default setup. |
+| `code_scanning_delegated_alert_dismissal` | — | Delegated dismissal for code-scanning alerts. |
+| `secret_scanning` | — | Secret scanning. |
+| `secret_scanning_push_protection` | — | Secret-scanning push protection. |
+| `secret_scanning_non_provider_patterns` | — | Non-provider patterns. |
+| `secret_scanning_validity_checks` | — | Validity checks. |
+| `secret_scanning_delegated_alert_dismissal` | — | Delegated dismissal for secret-scanning alerts. |
+| `private_vulnerability_reporting` | — | Private vulnerability reporting. |
+| `enforcement` | — | `enforced` \| `unenforced`. |
+| `apply_to` | — | `all_repos` → attach the config to every repo (scope=all). |
+| `default_for_new_repos` | — | `all` \| `none` \| `private_and_internal` \| `public` → set as the default for new repos. |
+
+!!! note "Attach / set-default only fire after a change"
+    To avoid kicking an attach job on every reconcile, caldrith attaches and sets-default
+    only when it just created or updated the configuration. A repo manually detached from
+    the config is not re-attached until the config itself next changes.
+
+!!! warning "Some Dependabot settings have no API"
+    **Dependabot malware alerts** and **Dependabot on self-hosted runners** are UI-only —
+    no REST field, not in this configuration object, not in `dependabot.yml`. Enable them
+    by hand (org Settings → Code security → Dependabot). **Version updates** and **grouped
+    updates** are file-based: provision a `.github/dependabot.yml` via the
+    [files](#provisioned-files-required-workflows) tier (`updates:` + a `groups:` block
+    with `applies-to: security-updates`).
 
 ## Overlays (suborgs + per-repo overrides)
 
