@@ -12,7 +12,7 @@ Verified against githubkit 0.16.0:
 
 from __future__ import annotations
 
-from githubkit import AppInstallationAuthStrategy, GitHub
+from githubkit import AppAuthStrategy, AppInstallationAuthStrategy, GitHub
 
 from caldrith.settings import AppConfig, get_config
 
@@ -40,4 +40,14 @@ class GitHubClientFactory:
             private_key=self._config.private_key,
             installation_id=installation_id,
         )
+        return GitHub(auth, base_url=base_url or self._config.github_api_url)
+
+    def for_app(self, base_url: str | None = None) -> GitHub[AppAuthStrategy]:
+        """Return a client authenticated as the App itself (a JWT, no installation).
+
+        Used to enumerate installations (``apps.list_installations`` /
+        ``apps.get_org_installation``) — the endpoints that take an app JWT, not an
+        installation token. Tokens are never shared across calls.
+        """
+        auth = AppAuthStrategy(app_id=self._config.app_id, private_key=self._config.private_key)
         return GitHub(auth, base_url=base_url or self._config.github_api_url)

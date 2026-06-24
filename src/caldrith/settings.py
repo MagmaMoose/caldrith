@@ -41,6 +41,25 @@ class AppConfig(BaseSettings):
     config_path: str = Field(".github", description="Directory holding the settings file.")
     settings_file_path: str = Field("settings.yml", description="Settings file name.")
 
+    # Manual + scheduled reconcile (break-glass when webhooks are silent).
+    manual_trigger_token: str | None = Field(
+        default=None,
+        description=(
+            "Bearer token guarding POST /reconcile. Unset disables the endpoint — set "
+            "to a long random string to enable manual reconciles."
+        ),
+    )
+    reconcile_cron_minutes: int = Field(
+        default=0,
+        ge=0,
+        le=1440,
+        description=(
+            "Periodic full reconcile across every installation, every N minutes. 0 (the "
+            "default) disables the cron. Use e.g. 60 to belt-and-brace against missed "
+            "webhooks; values that don't evenly divide 60 only run at matching minutes."
+        ),
+    )
+
     @field_validator("private_key")
     @classmethod
     def _normalize_private_key(cls, value: str) -> str:

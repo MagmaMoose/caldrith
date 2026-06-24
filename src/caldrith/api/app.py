@@ -24,6 +24,7 @@ from starlette.responses import JSONResponse
 from starlette.status import HTTP_503_SERVICE_UNAVAILABLE
 
 from caldrith.api.ratelimit import build_limiter
+from caldrith.api.reconcile import router as reconcile_router
 from caldrith.api.webhooks import router as webhooks_router
 from caldrith.audit.logging import configure_logging, get_logger
 from caldrith.settings import get_config
@@ -64,6 +65,7 @@ def create_app() -> FastAPI:
     app.add_middleware(SlowAPIMiddleware)
 
     app.include_router(webhooks_router)
+    app.include_router(reconcile_router)
 
     @app.get("/healthz", tags=["health"])
     async def healthz() -> dict[str, str]:
