@@ -53,6 +53,12 @@ spec:
               value: "settings.yml"
             - name: LOG_LEVEL
               value: "INFO"
+            # Hourly belt-and-braces: re-reconcile every installation so a missed admin
+            # webhook can't strand repos on stale config. Each enqueue is idempotent —
+            # it converges to a no-op when nothing has drifted. The cron is registered
+            # only in WorkerSettings, so this belongs on the worker, not the API.
+            - name: RECONCILE_CRON_MINUTES
+              value: "60"
           # No HTTP probes — this is a queue consumer, not a server. A crashed
           # worker is restarted by restartPolicy; an `arq --check` exec liveness can
           # be added once WorkerSettings.health_check_interval is tuned for it.
