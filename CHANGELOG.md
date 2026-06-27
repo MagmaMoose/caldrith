@@ -2,6 +2,20 @@
 
 <!-- version list -->
 
+## v1.12.0 (2026-06-27)
+
+### Chores
+
+- Update caldrith image
+  ([`18f8477`](https://github.com/MagmaMoose/caldrith/commit/18f8477a8a91b169496cf4e886b5016b2b1a9c08))
+
+### Features
+
+- **webhooks**: Re-base admin repo's open PRs on settings change
+  ([#37](https://github.com/MagmaMoose/caldrith/pull/37),
+  [`8b27985`](https://github.com/MagmaMoose/caldrith/commit/8b27985bde03d2363886af7fb72102dcc9ef904d))
+
+
 ## v1.11.2 (2026-06-27)
 
 ### Bug Fixes
