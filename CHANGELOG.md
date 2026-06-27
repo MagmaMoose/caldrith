@@ -2,6 +2,20 @@
 
 <!-- version list -->
 
+## v1.11.2 (2026-06-27)
+
+### Bug Fixes
+
+- **ci**: Build multi-arch (amd64+arm64) images
+  ([#35](https://github.com/MagmaMoose/caldrith/pull/35),
+  [`aed6a18`](https://github.com/MagmaMoose/caldrith/commit/aed6a18978700e8b19d779c63412cb0093463ef7))
+
+### Chores
+
+- Update caldrith image
+  ([`e396cd8`](https://github.com/MagmaMoose/caldrith/commit/e396cd81b4cb90bdd2d6d7372a38a44eaa421260))
+
+
 ## v1.11.1 (2026-06-24)
 
 ### Bug Fixes
