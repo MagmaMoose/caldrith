@@ -19,6 +19,13 @@ well inside GitHub's 10-second webhook timeout:
 No reconcile work happens in the request. The worker does the heavy lifting; for a
 full-account sync the planner **fans out one job per repo**.
 
+When the admin-repo `push` modifies the settings file itself on the default branch,
+Caldrith additionally **re-bases the admin repo's open PRs** onto the new baseline (the
+`update_admin_prs` job): each open config PR is a proposed change whose dry-run preview
+now diffs against a stale base, so any branch *behind* its base is merged forward with
+GitHub's "Update branch". A PR already up to date — or one with a conflict the App
+cannot auto-resolve — is skipped, so the sweep is idempotent and never blocks on one PR.
+
 Besides the admin-repo `push` / `repository` / `pull_request` events, the ingest
 also handles **drift events** (`label`, `milestone`, `member`,
 `branch_protection_rule`, `repository_ruleset`, `public`): an out-of-band change to
@@ -50,8 +57,9 @@ src/caldrith/
     overlay.py             # resolve_for_repo(): base -> suborgs -> repos overlay merge (pure)
     org.py                 # run_org_reconcile(): orgs.update + org actions/limits/property-defs/rulesets
     repository.py … files.py  # one module per repo-scoped tier, each exposing a TIER
+    pr_update.py           # update_open_prs(): re-base the admin repo's open PRs behind their base
   worker/
-    worker.py              # ARQ WorkerSettings + reconcile_installation / reconcile_repo / reconcile_org jobs
+    worker.py              # ARQ WorkerSettings + reconcile_installation / reconcile_repo / reconcile_org / update_admin_prs jobs
     queue.py               # enqueue helpers + dedup_delivery() (SETNX)
   audit/
     logging.py             # structlog JSON config; bind installation_id/delivery_id/repo

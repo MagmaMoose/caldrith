@@ -5,6 +5,8 @@ Three jobs:
     (so failures stay isolated) and, for Organization accounts, one ``reconcile_org``.
   - ``reconcile_repo``: reconcile (or dry-run) a single repository's tiers.
   - ``reconcile_org``: reconcile the installation's organization-scoped settings once.
+  - ``update_admin_prs``: re-base the admin repo's open PRs after a settings-file change
+    on the default branch (so each proposal is re-tested against the new baseline).
 
 Each job builds a *fresh* per-installation githubkit client (tokens are never shared
 across installations or reused across jobs).
@@ -24,6 +26,7 @@ from caldrith.config.loader import load_admin_config
 from caldrith.reconcile.org import run_org_reconcile
 from caldrith.reconcile.overlay import has_overlays
 from caldrith.reconcile.planner import list_target_repos
+from caldrith.reconcile.pr_update import update_open_prs
 from caldrith.reconcile.runner import REPO_TIERS, run_reconcile
 from caldrith.reconcile.selection import select_targets
 from caldrith.settings import get_config
@@ -101,6 +104,26 @@ async def reconcile_org(
     async with factory.for_installation(installation_id) as client:
         summary = await run_org_reconcile(client, installation_id=installation_id, owner=owner)
     return summary.any_changed
+
+
+async def update_admin_prs(
+    ctx: dict[str, Any],
+    *,
+    installation_id: int,
+    owner: str,
+) -> int:
+    """Re-base the admin repo's open PRs onto the new default-branch baseline.
+
+    Fired when a push modifies the admin settings file on the default branch: each open
+    config PR is a proposed change whose dry-run preview now diffs against a stale base,
+    so any branch behind its base is merged forward (GitHub's "Update branch"). Returns
+    the number of PRs updated.
+    """
+    factory: GitHubClientFactory = ctx["client_factory"]
+    config = get_config()
+    async with factory.for_installation(installation_id) as client:
+        summary = await update_open_prs(client, owner=owner, repo=config.admin_repo)
+    return len(summary.updated)
 
 
 async def reconcile_repo(
@@ -201,6 +224,7 @@ class WorkerSettings:
         reconcile_installation,
         reconcile_repo,
         reconcile_org,
+        update_admin_prs,
         reconcile_all_installations,
     ]
     cron_jobs: ClassVar = _cron_jobs()
