@@ -2,6 +2,20 @@
 
 <!-- version list -->
 
+## v1.12.1 (2026-07-01)
+
+### Bug Fixes
+
+- **worker,api**: Isolate ARQ on a Caldrith-specific queue
+  ([#32](https://github.com/MagmaMoose/caldrith/pull/32),
+  [`bcbc8a3`](https://github.com/MagmaMoose/caldrith/commit/bcbc8a33acefcafe2a5e21297764dc145312f0c5))
+
+### Chores
+
+- Update caldrith image
+  ([`5df73ea`](https://github.com/MagmaMoose/caldrith/commit/5df73eaaa369a5b2e57c41959c0e836267cf92fb))
+
+
 ## v1.12.0 (2026-06-27)
 
 ### Chores
