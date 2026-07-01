@@ -71,3 +71,14 @@
   the affected repo (or org). Caldrith's own write echoes back as an event, but the
   re-reconcile finds no drift and issues no write — so it self-terminates. Keep new
   tiers idempotent or this guarantee breaks.
+
+- **A managed branch name must never be a path-prefix of another.** The files tier's
+  per-base branches are `ci/caldrith/managed-files` (default) and
+  `ci/caldrith/managed-files-<base>` (others) — a **hyphen**, not `/`. A `/` would nest
+  the base branch under the default one (`…/staging`), and Git can't hold both a ref and
+  a ref nested under it (a directory/file conflict): once `ci/caldrith/managed-files`
+  exists, creating `ci/caldrith/managed-files/staging` fails with `cannot lock ref`
+  (HTTP 422), so that base silently never provisions (default PR opens, staging PR never
+  does). `respx` mocks don't model Git's ref rules, so this passed unit tests but broke
+  live — assert branch names are siblings, and verify multi-branch flows against real Git
+  behaviour, not just mocks.

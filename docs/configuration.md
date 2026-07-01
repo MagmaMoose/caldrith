@@ -982,7 +982,7 @@ pull request** — the way required workflows (the Chargate gate, a Diatreme rel
 get rolled out org-wide. Caldrith never pushes to a base branch directly: it opens
 (and reuses) one managed PR per repo **per target base branch** — from a stable
 `ci/caldrith/managed-files` branch for the default branch, or
-`ci/caldrith/managed-files/<base>` for another base such as `staging`.
+`ci/caldrith/managed-files-<base>` for another base such as `staging`.
 
 ```yaml
 files:
@@ -1019,7 +1019,7 @@ files:
   branch, one into `staging`; a repo that lacks a listed branch is skipped for that
   branch alone, not the others. The default branch keeps the stable
   `ci/caldrith/managed-files` branch name (existing PRs untouched); any other base uses
-  `ci/caldrith/managed-files/<base>`.
+  `ci/caldrith/managed-files-<base>`.
 
 Idempotent and non-destructive: files already matching are skipped, the PR branch is
 reused, and an open PR is never duplicated — so re-running while a PR is pending does
