@@ -2,6 +2,25 @@
 
 <!-- version list -->
 
+## v1.12.2 (2026-07-01)
+
+### Bug Fixes
+
+- **k8s**: Make manual-trigger secret opt-in ([#38](https://github.com/MagmaMoose/caldrith/pull/38),
+  [`3b016c9`](https://github.com/MagmaMoose/caldrith/commit/3b016c924c43168bb1ad3309b3086b6cbc51223a))
+
+### Build System
+
+- **deps**: Bump the github-actions group across 1 directory with 2 updates
+  ([#34](https://github.com/MagmaMoose/caldrith/pull/34),
+  [`62a71c0`](https://github.com/MagmaMoose/caldrith/commit/62a71c06ee31345ef8474dc815cec3205fcad287))
+
+### Chores
+
+- Update caldrith image
+  ([`cd2f478`](https://github.com/MagmaMoose/caldrith/commit/cd2f478a39dfd755bcf6cc398564cf25ac228331))
+
+
 ## v1.12.1 (2026-07-01)
 
 ### Bug Fixes
