@@ -2,6 +2,20 @@
 
 <!-- version list -->
 
+## v1.13.0 (2026-07-01)
+
+### Chores
+
+- Update caldrith image
+  ([`a941e35`](https://github.com/MagmaMoose/caldrith/commit/a941e359c024761164912772dcb8e5bac76b7a8b))
+
+### Features
+
+- **files**: Provision managed files into multiple base branches
+  ([#39](https://github.com/MagmaMoose/caldrith/pull/39),
+  [`1ae0987`](https://github.com/MagmaMoose/caldrith/commit/1ae0987e6f1f6854ff9c99827fe19b3e6222001c))
+
+
 ## v1.12.2 (2026-07-01)
 
 ### Bug Fixes
