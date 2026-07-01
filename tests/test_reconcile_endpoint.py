@@ -13,6 +13,7 @@ from githubkit import GitHub
 
 import caldrith.api.app as app_module
 import caldrith.api.reconcile as reconcile_module
+from caldrith.worker.queue import ARQ_QUEUE_NAME
 
 _TOKEN = "secret-trigger-token"
 
@@ -107,7 +108,10 @@ def test_enqueues_for_one_owner(client: TestClient) -> None:
     assert resp.status_code == 202
     assert resp.json() == {"enqueued": [{"installation_id": 42, "owner": "MagmaMoose"}]}
     assert client.fake_arq.jobs == [  # type: ignore[attr-defined]
-        ("reconcile_installation", {"installation_id": 42, "owner": "MagmaMoose"})
+        (
+            "reconcile_installation",
+            {"installation_id": 42, "owner": "MagmaMoose", "_queue_name": ARQ_QUEUE_NAME},
+        )
     ]
 
 

@@ -31,6 +31,7 @@ from caldrith.reconcile.runner import REPO_TIERS, run_reconcile
 from caldrith.reconcile.selection import select_targets
 from caldrith.settings import get_config
 from caldrith.worker.installations import paginate_installations
+from caldrith.worker.queue import ARQ_QUEUE_NAME
 
 _log = get_logger(__name__)
 
@@ -62,7 +63,10 @@ async def reconcile_installation(
         # single org reconcile when an organization block is declared.
         if settings_config.organization is not None:
             await arq_redis.enqueue_job(
-                "reconcile_org", installation_id=installation_id, owner=owner
+                "reconcile_org",
+                installation_id=installation_id,
+                owner=owner,
+                _queue_name=ARQ_QUEUE_NAME,
             )
 
         # Fan out one repo job per managed repo if ANY repo-scoped tier (or an overlay
@@ -88,6 +92,7 @@ async def reconcile_installation(
             repo=target.name,
             dry_run=False,
             head_sha=None,
+            _queue_name=ARQ_QUEUE_NAME,
         )
     log.info("reconcile_installation.fanned_out", count=len(targets))
     return len(targets)
@@ -166,6 +171,7 @@ async def reconcile_all_installations(ctx: dict[str, Any]) -> int:
             "reconcile_installation",
             installation_id=installation["id"],
             owner=installation["account"]["login"],
+            _queue_name=ARQ_QUEUE_NAME,
         )
     _log.info("reconcile_all_installations.enqueued", source="cron", count=len(installations))
     return len(installations)
@@ -230,6 +236,10 @@ class WorkerSettings:
     cron_jobs: ClassVar = _cron_jobs()
     on_startup = startup
     on_shutdown = shutdown
+    # Consume from Caldrith's own queue, not ARQ's shared default ``arq:queue``. Without
+    # this, a co-tenant ARQ app on the same Redis pops Caldrith's jobs and fails them
+    # ("function not found"), silently stalling all reconciles. See ``ARQ_QUEUE_NAME``.
+    queue_name: ClassVar = ARQ_QUEUE_NAME
     # ARQ reads settings off the class ``__dict__``, so ``redis_settings`` MUST be a
     # real class attribute — a metaclass property is invisible to ARQ, which then
     # silently falls back to redis://localhost:6379. Resolve REDIS_URL at import with

@@ -28,6 +28,7 @@ from caldrith.api.reconcile import router as reconcile_router
 from caldrith.api.webhooks import router as webhooks_router
 from caldrith.audit.logging import configure_logging, get_logger
 from caldrith.settings import get_config
+from caldrith.worker.queue import ARQ_QUEUE_NAME
 
 _log = get_logger(__name__)
 
@@ -37,7 +38,9 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     """Open Redis connections on startup, close them on shutdown."""
     config = get_config()
     app.state.redis = aioredis.from_url(config.redis_url, decode_responses=True)
-    app.state.arq_redis = await create_pool(RedisSettings.from_dsn(config.redis_url))
+    app.state.arq_redis = await create_pool(
+        RedisSettings.from_dsn(config.redis_url), default_queue_name=ARQ_QUEUE_NAME
+    )
     get_logger(__name__).info("api.startup")
     try:
         yield
