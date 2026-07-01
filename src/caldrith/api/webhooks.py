@@ -8,7 +8,9 @@ Flow (kept well under GitHub's 10s timeout):
   5. Return ``202 Accepted``.
 
 Events handled:
-  - ``push``: a push to the admin repo's default branch -> full-account reconcile.
+  - ``push``: a push to the admin repo's default branch -> full-account reconcile; if the
+    push touched the settings file, also re-base the admin repo's open PRs onto the new
+    baseline (the ``update_admin_prs`` job).
   - ``repository`` (created/edited): reconcile just that repo.
   - ``pull_request`` (opened/reopened/synchronize) touching the admin repo's settings
     on a *non-default* branch -> DRY-RUN: post a Check Run with the diff, mutate
@@ -36,6 +38,7 @@ from caldrith.worker.queue import (
     enqueue_reconcile_installation,
     enqueue_reconcile_org,
     enqueue_reconcile_repo,
+    enqueue_update_admin_prs,
 )
 
 router = APIRouter(tags=["webhooks"])
@@ -70,8 +73,23 @@ def _admin_settings_paths(config: Any) -> set[str]:
     return {path}
 
 
+def _push_touches_settings(payload: dict, config: Any) -> bool:
+    """True when any commit in the push added/modified/removed the admin settings file."""
+    paths = _admin_settings_paths(config)
+    for commit in payload.get("commits") or []:
+        for key in ("added", "modified", "removed"):
+            if paths.intersection(commit.get(key) or []):
+                return True
+    return False
+
+
 async def _handle_push(arq_redis: Any, payload: dict, installation_id: int) -> None:
-    """A push to the admin repo's default branch triggers a full-account reconcile."""
+    """A push to the admin repo's default branch triggers a full-account reconcile.
+
+    When that same push modifies the settings file itself, the open config PRs now diff
+    against a stale base — so we additionally sweep them, re-basing every branch behind
+    its base onto the new baseline (GitHub's "Update branch", in bulk).
+    """
     repo = payload.get("repository") or {}
     owner = (repo.get("owner") or {}).get("login")
     repo_name = repo.get("name")
@@ -79,15 +97,18 @@ async def _handle_push(arq_redis: Any, payload: dict, installation_id: int) -> N
     pushed_branch = _ref_branch(payload.get("ref"))
     config = get_config()
 
-    if (
+    if not (
         owner
         and repo_name == config.admin_repo
         and pushed_branch is not None
         and pushed_branch == default_branch
     ):
-        await enqueue_reconcile_installation(
-            arq_redis, installation_id=installation_id, owner=owner
-        )
+        return
+
+    await enqueue_reconcile_installation(arq_redis, installation_id=installation_id, owner=owner)
+
+    if _push_touches_settings(payload, config):
+        await enqueue_update_admin_prs(arq_redis, installation_id=installation_id, owner=owner)
 
 
 async def _handle_repository(arq_redis: Any, payload: dict, installation_id: int) -> None:

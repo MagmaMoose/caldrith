@@ -28,7 +28,7 @@
     },
     "api.webhooks": {
       "path": "src/caldrith/api/webhooks.py",
-      "purpose": "POST /: read RAW body -> verify signature -> dedup on X-GitHub-Delivery -> enqueue ARQ job -> return 202. Routes push/repository/pull_request plus reactive drift events (label/milestone/member/branch_protection_rule/repository_ruleset/public) that self-heal the affected repo (or org). THIN — no reconcile here.",
+      "purpose": "POST /: read RAW body -> verify signature -> dedup on X-GitHub-Delivery -> enqueue ARQ job -> return 202. Routes push (full-account reconcile; also enqueues update_admin_prs when the push touched the settings file on the default branch)/repository/pull_request plus reactive drift events (label/milestone/member/branch_protection_rule/repository_ruleset/public) that self-heal the affected repo (or org). THIN — no reconcile here.",
       "exports": ["router"],
       "depends_on": ["api.security", "worker.queue", "settings", "audit.logging"]
     },
@@ -110,16 +110,22 @@
       "exports": ["reconcile", "TIER"],
       "depends_on": ["config.schema", "reconcile.base", "reconcile.planner", "github_json"]
     },
+    "reconcile.pr_update": {
+      "path": "src/caldrith/reconcile/pr_update.py",
+      "purpose": "update_open_prs(client, owner, repo) -> UpdateSummary: after a settings-file change on the admin repo's default branch, re-base the open config PRs onto the new baseline. Lists open PRs, compares each head against its base (behind_by), and calls pulls.async_update_branch on any branch behind its base. Idempotent (up-to-date PRs skipped) and tolerant (a 409/422/403 records the PR as skipped, never aborts the sweep).",
+      "exports": ["update_open_prs", "UpdateSummary"],
+      "depends_on": ["github_json", "audit.logging"]
+    },
     "worker.worker": {
       "path": "src/caldrith/worker/worker.py",
-      "purpose": "ARQ WorkerSettings + jobs reconcile_installation (fan out one reconcile_repo per managed repo when any repo tier/overlay is configured, plus one reconcile_org when an organization block is present), reconcile_repo, reconcile_org. Redis settings from REDIS_URL.",
-      "exports": ["WorkerSettings", "reconcile_installation", "reconcile_repo", "reconcile_org"],
-      "depends_on": ["reconcile.runner", "reconcile.org", "reconcile.overlay", "settings", "audit.logging"]
+      "purpose": "ARQ WorkerSettings + jobs reconcile_installation (fan out one reconcile_repo per managed repo when any repo tier/overlay is configured, plus one reconcile_org when an organization block is present), reconcile_repo, reconcile_org, update_admin_prs (re-base the admin repo's open PRs after a settings-file change on the default branch). Redis settings from REDIS_URL.",
+      "exports": ["WorkerSettings", "reconcile_installation", "reconcile_repo", "reconcile_org", "update_admin_prs"],
+      "depends_on": ["reconcile.runner", "reconcile.org", "reconcile.overlay", "reconcile.pr_update", "settings", "audit.logging"]
     },
     "worker.queue": {
       "path": "src/caldrith/worker/queue.py",
-      "purpose": "Enqueue helpers (reconcile_installation / reconcile_repo / reconcile_org) + dedup_delivery(redis, delivery_id) using Redis SETNX with a TTL to drop duplicate webhook deliveries.",
-      "exports": ["enqueue_reconcile_installation", "enqueue_reconcile_repo", "enqueue_reconcile_org", "dedup_delivery"],
+      "purpose": "Enqueue helpers (reconcile_installation / reconcile_repo / reconcile_org / update_admin_prs) + dedup_delivery(redis, delivery_id) using Redis SETNX with a TTL to drop duplicate webhook deliveries.",
+      "exports": ["enqueue_reconcile_installation", "enqueue_reconcile_repo", "enqueue_reconcile_org", "enqueue_update_admin_prs", "dedup_delivery"],
       "depends_on": ["settings"]
     },
     "audit.logging": {

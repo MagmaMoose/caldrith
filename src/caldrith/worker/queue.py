@@ -102,3 +102,18 @@ async def enqueue_reconcile_org(
         owner=owner,
         _queue_name=ARQ_QUEUE_NAME,
     )
+
+
+async def enqueue_update_admin_prs(
+    arq_redis: Any,
+    *,
+    installation_id: int,
+    owner: str,
+) -> None:
+    """Enqueue a sweep that re-bases the admin repo's open PRs onto the new baseline."""
+    await arq_redis.enqueue_job(
+        "update_admin_prs",
+        installation_id=installation_id,
+        owner=owner,
+        _queue_name=ARQ_QUEUE_NAME,
+    )

@@ -10,7 +10,9 @@ from caldrith.worker.queue import (
     ARQ_QUEUE_NAME,
     dedup_delivery,
     enqueue_reconcile_installation,
+    enqueue_reconcile_org,
     enqueue_reconcile_repo,
+    enqueue_update_admin_prs,
 )
 
 
@@ -76,5 +78,7 @@ async def test_every_enqueue_targets_caldrith_queue() -> None:
     pool = _RecordingPool()
     await enqueue_reconcile_installation(pool, installation_id=1, owner="acme")
     await enqueue_reconcile_repo(pool, installation_id=1, owner="acme", repo="widget")
+    await enqueue_reconcile_org(pool, installation_id=1, owner="acme")
+    await enqueue_update_admin_prs(pool, installation_id=1, owner="acme")
     assert ARQ_QUEUE_NAME != "arq:queue"
     assert all(kwargs["_queue_name"] == ARQ_QUEUE_NAME for _, kwargs in pool.jobs)

@@ -123,6 +123,54 @@ def test_push_to_admin_default_branch_enqueues_full_sync(client: TestClient) -> 
     ]
 
 
+def test_push_touching_settings_also_updates_open_prs(client: TestClient) -> None:
+    payload = {
+        "ref": "refs/heads/main",
+        "repository": {
+            "name": "admin",
+            "default_branch": "main",
+            "owner": {"login": "acme"},
+        },
+        "commits": [{"modified": [".github/settings.yml"], "added": [], "removed": []}],
+        "installation": {"id": 42},
+    }
+    resp = _post(client, payload, event="push", delivery="push-settings")
+    assert resp.status_code == 202
+    jobs = client.fake_arq.jobs  # type: ignore[attr-defined]
+    assert jobs == [
+        (
+            "reconcile_installation",
+            {"installation_id": 42, "owner": "acme", "_queue_name": ARQ_QUEUE_NAME},
+        ),
+        (
+            "update_admin_prs",
+            {"installation_id": 42, "owner": "acme", "_queue_name": ARQ_QUEUE_NAME},
+        ),
+    ]
+
+
+def test_push_not_touching_settings_skips_pr_update(client: TestClient) -> None:
+    payload = {
+        "ref": "refs/heads/main",
+        "repository": {
+            "name": "admin",
+            "default_branch": "main",
+            "owner": {"login": "acme"},
+        },
+        "commits": [{"modified": ["README.md"], "added": [], "removed": []}],
+        "installation": {"id": 42},
+    }
+    resp = _post(client, payload, event="push", delivery="push-readme")
+    assert resp.status_code == 202
+    jobs = client.fake_arq.jobs  # type: ignore[attr-defined]
+    assert jobs == [
+        (
+            "reconcile_installation",
+            {"installation_id": 42, "owner": "acme", "_queue_name": ARQ_QUEUE_NAME},
+        )
+    ]
+
+
 def test_push_to_non_admin_repo_ignored(client: TestClient) -> None:
     payload = {
         "ref": "refs/heads/main",

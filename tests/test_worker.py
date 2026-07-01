@@ -13,7 +13,7 @@ import respx
 from githubkit import GitHub
 
 from caldrith.worker.queue import ARQ_QUEUE_NAME
-from caldrith.worker.worker import reconcile_installation
+from caldrith.worker.worker import reconcile_installation, update_admin_prs
 
 
 class _FakeArqRedis:
@@ -159,3 +159,29 @@ def test_worker_consumes_the_caldrith_queue() -> None:
 
     assert WorkerSettings.queue_name == ARQ_QUEUE_NAME
     assert WorkerSettings.queue_name != "arq:queue"
+
+
+@respx.mock
+async def test_update_admin_prs_job_updates_behind_pr() -> None:
+    # The job sweeps the admin repo's open PRs and re-bases any behind their base.
+    respx.get(
+        "https://api.github.com/repos/acme/admin/pulls",
+        params={"state": "open", "per_page": "100", "page": "1"},
+    ).mock(
+        return_value=httpx.Response(
+            200,
+            json=[{"number": 3, "base": {"ref": "main"}, "head": {"ref": "x", "label": "acme:x"}}],
+        )
+    )
+    respx.get("https://api.github.com/repos/acme/admin/compare/main...acme:x").mock(
+        return_value=httpx.Response(200, json={"behind_by": 2})
+    )
+    update = respx.put("https://api.github.com/repos/acme/admin/pulls/3/update-branch").mock(
+        return_value=httpx.Response(202, json={})
+    )
+    ctx = {"client_factory": _FakeFactory(GitHub("token"))}
+
+    updated = await update_admin_prs(ctx, installation_id=42, owner="acme")
+
+    assert update.called
+    assert updated == 1
