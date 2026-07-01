@@ -38,7 +38,7 @@ _REF = f"{_REPO}/git/refs/heads/{_BRANCH}"  # delete-ref endpoint (plural "refs"
 _PULLS = f"{_REPO}/pulls"
 _COMPARE = f"{_REPO}/compare/main...{_BRANCH}"
 _GRAPHQL = "https://api.github.com/graphql"
-_STAGING_BRANCH = f"{_BRANCH}/staging"  # ci/caldrith/managed-files/staging (a non-default base)
+_STAGING_BRANCH = f"{_BRANCH}-staging"  # ci/caldrith/managed-files-staging (a non-default sibling)
 _STAGING_BRANCH_REF = f"{_REPO}/git/ref/heads/{_STAGING_BRANCH}"
 _STAGING_REF = f"{_REPO}/git/ref/heads/staging"  # the staging base branch itself
 _STAGING_COMPARE = f"{_REPO}/compare/staging...{_STAGING_BRANCH}"
@@ -656,10 +656,16 @@ async def test_upgrade_only_still_syncs_non_version_drift() -> None:
 
 def test_managed_branch_names_default_and_extra_bases() -> None:
     # The default branch keeps the stable branch name (existing PRs untouched); any other
-    # base is namespaced so it gets its own managed PR.
+    # base gets a *sibling* branch (hyphen, not "/") so it has its own managed PR.
     assert _managed_branch("main", "main") == _BRANCH
-    assert _managed_branch("staging", "main") == f"{_BRANCH}/staging"
-    assert _managed_branch("main", "develop") == f"{_BRANCH}/main"  # "main" isn't default here
+    assert _managed_branch("staging", "main") == f"{_BRANCH}-staging"
+    assert _managed_branch("main", "develop") == f"{_BRANCH}-main"  # "main" isn't default here
+    # A non-default managed branch must NOT be nested under the default one: Git can't hold
+    # both a ref and a ref path-prefixed by it (a directory/file conflict), so once
+    # ci/caldrith/managed-files exists a ".../staging" child could never be created. A "/"
+    # inside a base name is flattened to "-" for the same reason.
+    assert not _managed_branch("staging", "main").startswith(f"{_BRANCH}/")
+    assert _managed_branch("release/v2", "main") == f"{_BRANCH}-release-v2"
 
 
 def test_resolve_bases_defaults_dedups_and_preserves_order() -> None:

@@ -2,7 +2,7 @@
 
 Caldrith never pushes to a base branch directly — it opens (and reuses) a managed PR
 from a stable branch (``ci/caldrith/managed-files`` for the default branch, or
-``ci/caldrith/managed-files/<base>`` for another base such as ``staging``) that adds,
+``ci/caldrith/managed-files-<base>`` for another base such as ``staging``) that adds,
 updates, and prunes the declared files, so a human/automation merges it. A file's
 ``branches`` selects the base branches it targets (default: the repo's default branch),
 and each base gets its own managed PR. This is how required workflows (the Chargate
@@ -56,7 +56,7 @@ from caldrith.reconcile.selection import matches_any
 _BRANCH = "ci/caldrith/managed-files"
 # Sentinel in a file's ``branches`` meaning "this repo's default branch" (whatever it is
 # named). Managed PRs into the default branch keep the stable ``_BRANCH`` name; any other
-# base gets a ``_BRANCH/<base>`` branch, so each base branch has its own managed PR.
+# base gets a ``_BRANCH-<base>`` sibling branch, so each base branch has its own managed PR.
 _DEFAULT_BASE = "default"
 _COMMIT_MESSAGE = "chore: provision required workflows (caldrith)"
 _PR_TITLE = "Caldrith: provision required workflows"
@@ -131,12 +131,19 @@ def _managed_branch(base: str, default_branch: str) -> str:
     """The managed PR branch name for a given ``base`` branch.
 
     The default branch keeps the stable ``ci/caldrith/managed-files`` name (so an existing
-    managed PR stays untouched); any other base gets ``ci/caldrith/managed-files/<base>`` —
-    one managed PR per base branch.
+    managed PR stays untouched); any other base gets a ``ci/caldrith/managed-files-<base>``
+    *sibling* — one managed PR per base branch.
+
+    The separator is a hyphen, NOT ``/``, on purpose. ``ci/caldrith/managed-files/<base>``
+    would be a child path of the default branch, and Git cannot hold both a ref and another
+    ref nested under it (a directory/file conflict): once ``ci/caldrith/managed-files``
+    exists, creating ``ci/caldrith/managed-files/staging`` fails with ``cannot lock ref``
+    (HTTP 422), so that base would silently never be provisioned. Any ``/`` inside ``base``
+    is flattened to ``-`` for the same reason.
     """
     if base == default_branch:
         return _BRANCH
-    return f"{_BRANCH}/{base}"
+    return f"{_BRANCH}-{base.replace('/', '-')}"
 
 
 def _resolve_bases(managed: ManagedFile, default_branch: str) -> list[str]:
@@ -408,7 +415,7 @@ class FileProvisioner:
         sentinel is the repo's default branch, and an unset ``branches`` means the default
         branch only). Files are grouped by resolved base branch and each base is
         provisioned independently — into its own ``ci/caldrith/managed-files`` (default
-        branch) or ``ci/caldrith/managed-files/<base>`` PR — so a repo missing a listed
+        branch) or ``ci/caldrith/managed-files-<base>`` PR — so a repo missing a listed
         base branch is skipped for that base without affecting the others. Returns one
         :class:`FilesResult` per base processed.
         """
