@@ -11,8 +11,14 @@ import respx
 from githubkit import GitHub
 from githubkit.exception import RequestFailed
 
-from caldrith.config.schema import ManagedFile
-from caldrith.reconcile.files import FileProvisioner, _repo_is_ahead
+from caldrith.config.schema import ManagedFile, SafeSettingsConfig
+from caldrith.reconcile.files import (
+    FileProvisioner,
+    _managed_branch,
+    _repo_is_ahead,
+    _resolve_bases,
+    reconcile,
+)
 from caldrith.reconcile.planner import TargetRepo
 
 
@@ -32,6 +38,10 @@ _REF = f"{_REPO}/git/refs/heads/{_BRANCH}"  # delete-ref endpoint (plural "refs"
 _PULLS = f"{_REPO}/pulls"
 _COMPARE = f"{_REPO}/compare/main...{_BRANCH}"
 _GRAPHQL = "https://api.github.com/graphql"
+_STAGING_BRANCH = f"{_BRANCH}/staging"  # ci/caldrith/managed-files/staging (a non-default base)
+_STAGING_BRANCH_REF = f"{_REPO}/git/ref/heads/{_STAGING_BRANCH}"
+_STAGING_REF = f"{_REPO}/git/ref/heads/staging"  # the staging base branch itself
+_STAGING_COMPARE = f"{_REPO}/compare/staging...{_STAGING_BRANCH}"
 
 CONTENT = "name: Security\non: [pull_request]\n"
 
@@ -137,7 +147,7 @@ async def test_provisions_when_absent_opens_pr() -> None:
     )
 
     async with GitHub("token") as client:
-        result = await FileProvisioner(client).apply(TargetRepo("acme", "widget"), [_managed()])
+        [result] = await FileProvisioner(client).apply(TargetRepo("acme", "widget"), [_managed()])
 
     assert create_ref.called and commit.called and create_pr.called
     assert _added_paths(commit) == [_PATH]  # one signed commit adds the file
@@ -154,7 +164,7 @@ async def test_noop_when_already_matching() -> None:
     commit = _mock_commit()
 
     async with GitHub("token") as client:
-        result = await FileProvisioner(client).apply(TargetRepo("acme", "widget"), [_managed()])
+        [result] = await FileProvisioner(client).apply(TargetRepo("acme", "widget"), [_managed()])
 
     assert not commit.called
     assert result.changed is False
@@ -168,7 +178,7 @@ async def test_create_only_does_not_overwrite_existing() -> None:
     commit = _mock_commit()
 
     async with GitHub("token") as client:
-        result = await FileProvisioner(client).apply(
+        [result] = await FileProvisioner(client).apply(
             TargetRepo("acme", "widget"), [_managed(create_only=True)]
         )
 
@@ -196,7 +206,7 @@ async def test_updates_drifted_and_reuses_open_pr() -> None:
     create_pr = respx.post(_PULLS).mock(return_value=httpx.Response(201, json={"html_url": "x"}))
 
     async with GitHub("token") as client:
-        result = await FileProvisioner(client).apply(TargetRepo("acme", "widget"), [_managed()])
+        [result] = await FileProvisioner(client).apply(TargetRepo("acme", "widget"), [_managed()])
 
     assert commit.called and not create_pr.called  # one signed commit; existing PR reused
     assert _added_content(commit, _PATH) == CONTENT  # updated to the declared content
@@ -212,7 +222,7 @@ async def test_dry_run_never_writes() -> None:
     create_pr = respx.post(_PULLS).mock(return_value=httpx.Response(201, json={"html_url": "x"}))
 
     async with GitHub("token") as client:
-        result = await FileProvisioner(client, dry_run=True).apply(
+        [result] = await FileProvisioner(client, dry_run=True).apply(
             TargetRepo("acme", "widget"), [_managed()]
         )
 
@@ -232,7 +242,7 @@ async def test_skip_repos_excludes_file_for_matching_repo() -> None:
 
     managed = ManagedFile(path=_PATH, content=CONTENT, skip_repos=["wid*"])
     async with GitHub("token") as client:
-        result = await FileProvisioner(client).apply(TargetRepo("acme", "widget"), [managed])
+        [result] = await FileProvisioner(client).apply(TargetRepo("acme", "widget"), [managed])
 
     assert not contents.called  # skipped before any lookup
     assert not commit.called and not create_pr.called
@@ -257,7 +267,7 @@ async def test_create_only_skips_when_sibling_extension_exists() -> None:
         create_only=True,
     )
     async with GitHub("token") as client:
-        result = await FileProvisioner(client).apply(TargetRepo("acme", "widget"), [managed])
+        [result] = await FileProvisioner(client).apply(TargetRepo("acme", "widget"), [managed])
 
     assert not commit.called  # sibling release.yml present -> no duplicate
     assert result.changed is False
@@ -277,7 +287,7 @@ async def test_empty_repo_skipped_gracefully() -> None:
     create_pr = respx.post(_PULLS).mock(return_value=httpx.Response(201, json={"html_url": "x"}))
 
     async with GitHub("token") as client:
-        result = await FileProvisioner(client).apply(TargetRepo("acme", "widget"), [_managed()])
+        [result] = await FileProvisioner(client).apply(TargetRepo("acme", "widget"), [_managed()])
 
     assert not create_ref.called and not commit.called and not create_pr.called
     assert result.changed is False and result.applied is False
@@ -308,7 +318,7 @@ async def test_prunes_added_orphan_and_reuses_pr() -> None:
     create_pr = respx.post(_PULLS).mock(return_value=httpx.Response(201, json={"html_url": "x"}))
 
     async with GitHub("token") as client:
-        result = await FileProvisioner(client).apply(TargetRepo("acme", "widget"), [_managed()])
+        [result] = await FileProvisioner(client).apply(TargetRepo("acme", "widget"), [_managed()])
 
     assert commit.called and not create_pr.called  # one signed commit; PR reused
     assert _deleted_paths(commit) == [rel] and _added_paths(commit) == []  # only the orphan dropped
@@ -343,7 +353,7 @@ async def test_reverts_modified_orphan_to_base() -> None:
     )
 
     async with GitHub("token") as client:
-        result = await FileProvisioner(client).apply(TargetRepo("acme", "widget"), [_managed()])
+        [result] = await FileProvisioner(client).apply(TargetRepo("acme", "widget"), [_managed()])
 
     # The orphan is reverted (re-added with the base content), not deleted; security.yml
     # is already staged so it is not re-added.
@@ -363,7 +373,7 @@ async def test_dry_run_reports_removed_without_writing() -> None:
     commit = _mock_commit()
 
     async with GitHub("token") as client:
-        result = await FileProvisioner(client, dry_run=True).apply(
+        [result] = await FileProvisioner(client, dry_run=True).apply(
             TargetRepo("acme", "widget"), [_managed()]
         )
 
@@ -395,7 +405,7 @@ async def test_prune_to_empty_closes_pr_and_deletes_branch() -> None:
 
     managed = ManagedFile(path=_PATH, content=CONTENT, skip_repos=["wid*"])
     async with GitHub("token") as client:
-        result = await FileProvisioner(client).apply(TargetRepo("acme", "widget"), [managed])
+        [result] = await FileProvisioner(client).apply(TargetRepo("acme", "widget"), [managed])
 
     assert close.called and b"closed" in close.calls.last.request.content
     assert delete_ref.called
@@ -420,7 +430,7 @@ async def test_close_to_empty_with_no_open_pr_still_deletes_branch() -> None:
 
     managed = ManagedFile(path=_PATH, content=CONTENT, skip_repos=["wid*"])
     async with GitHub("token") as client:
-        result = await FileProvisioner(client).apply(TargetRepo("acme", "widget"), [managed])
+        [result] = await FileProvisioner(client).apply(TargetRepo("acme", "widget"), [managed])
 
     assert delete_ref.called and not close.called  # branch deleted, no PR to close
     assert result.removed == [rel] and result.closed_pr_url is None
@@ -439,7 +449,7 @@ async def test_close_branch_swallows_delete_ref_404() -> None:
 
     managed = ManagedFile(path=_PATH, content=CONTENT, skip_repos=["wid*"])
     async with GitHub("token") as client:
-        result = await FileProvisioner(client).apply(TargetRepo("acme", "widget"), [managed])
+        [result] = await FileProvisioner(client).apply(TargetRepo("acme", "widget"), [managed])
 
     assert delete_ref.called and result.applied is True and result.removed == [rel]
 
@@ -494,7 +504,7 @@ async def test_prunes_multiple_added_orphans_in_one_run() -> None:
     _open_pr()
 
     async with GitHub("token") as client:
-        result = await FileProvisioner(client).apply(TargetRepo("acme", "widget"), [_managed()])
+        [result] = await FileProvisioner(client).apply(TargetRepo("acme", "widget"), [_managed()])
 
     assert _deleted_paths(commit) == [rel, legacy] and _added_paths(commit) == []  # one commit
     assert result.removed == [rel, legacy] and result.files == [_PATH]
@@ -519,7 +529,7 @@ async def test_modified_orphan_deleted_when_repo_dropped_its_own_copy() -> None:
     _open_pr()
 
     async with GitHub("token") as client:
-        result = await FileProvisioner(client).apply(TargetRepo("acme", "widget"), [_managed()])
+        [result] = await FileProvisioner(client).apply(TargetRepo("acme", "widget"), [_managed()])
 
     assert _deleted_paths(commit) == [legacy] and _added_paths(commit) == []  # base gone -> delete
     assert result.removed == [legacy]
@@ -565,7 +575,7 @@ async def test_prune_skips_orphan_already_absent_on_branch() -> None:
     _open_pr()
 
     async with GitHub("token") as client:
-        result = await FileProvisioner(client).apply(TargetRepo("acme", "widget"), [_managed()])
+        [result] = await FileProvisioner(client).apply(TargetRepo("acme", "widget"), [_managed()])
 
     assert not commit.called  # orphan already absent + security staged -> empty changeset
     assert result.applied is True
@@ -595,7 +605,7 @@ async def test_upgrade_only_skips_when_repo_pin_is_ahead() -> None:
 
     managed = ManagedFile(path=_PATH, content=admin, upgrade_only=True)
     async with GitHub("token") as client:
-        result = await FileProvisioner(client).apply(TargetRepo("acme", "widget"), [managed])
+        [result] = await FileProvisioner(client).apply(TargetRepo("acme", "widget"), [managed])
 
     assert result.files == [] and result.changed is False
     assert not commit.called  # nothing provisioned -> no commit, no downgrade PR
@@ -612,7 +622,7 @@ async def test_upgrade_only_updates_when_repo_pin_is_behind() -> None:
 
     managed = ManagedFile(path=_PATH, content=admin, upgrade_only=True)
     async with GitHub("token") as client:
-        result = await FileProvisioner(client, dry_run=True).apply(
+        [result] = await FileProvisioner(client, dry_run=True).apply(
             TargetRepo("acme", "widget"), [managed]
         )
 
@@ -632,8 +642,169 @@ async def test_upgrade_only_still_syncs_non_version_drift() -> None:
 
     managed = ManagedFile(path=_PATH, content=admin, upgrade_only=True)
     async with GitHub("token") as client:
-        result = await FileProvisioner(client, dry_run=True).apply(
+        [result] = await FileProvisioner(client, dry_run=True).apply(
             TargetRepo("acme", "widget"), [managed]
         )
 
     assert result.files == [_PATH]  # same version, other drift -> sync
+
+
+# ---------------------------------------------------------------------------
+# multi-base: a file's ``branches`` provisions one managed PR per base branch
+# ---------------------------------------------------------------------------
+
+
+def test_managed_branch_names_default_and_extra_bases() -> None:
+    # The default branch keeps the stable branch name (existing PRs untouched); any other
+    # base is namespaced so it gets its own managed PR.
+    assert _managed_branch("main", "main") == _BRANCH
+    assert _managed_branch("staging", "main") == f"{_BRANCH}/staging"
+    assert _managed_branch("main", "develop") == f"{_BRANCH}/main"  # "main" isn't default here
+
+
+def test_resolve_bases_defaults_dedups_and_preserves_order() -> None:
+    plain = ManagedFile(path=_PATH, content=CONTENT)
+    assert _resolve_bases(plain, "main") == ["main"]  # unset -> the default branch only
+    both = ManagedFile(path=_PATH, content=CONTENT, branches=["default", "staging"])
+    assert _resolve_bases(both, "main") == ["main", "staging"]  # "default" -> the default branch
+    dupe = ManagedFile(path=_PATH, content=CONTENT, branches=["default", "main"])
+    assert _resolve_bases(dupe, "main") == ["main"]  # "default" and its name collapse to one
+    reordered = ManagedFile(path=_PATH, content=CONTENT, branches=["staging", "default"])
+    assert _resolve_bases(reordered, "develop") == ["staging", "develop"]  # order preserved
+
+
+@respx.mock
+async def test_branches_opens_one_pr_per_base() -> None:
+    # A file targeting [default, staging], absent on both branches, opens two managed PRs:
+    # one on ci/caldrith/managed-files (base main) and one on the namespaced staging branch.
+    _mock_repo()
+    respx.get(_CONTENTS).mock(return_value=httpx.Response(404))  # absent on every ref
+    _no_branch()  # main...managed-branch compare: no managed branch yet
+    respx.get(_STAGING_COMPARE).mock(return_value=httpx.Response(404))
+    respx.get(_BRANCH_REF).mock(return_value=httpx.Response(404))  # main managed branch absent
+    respx.get(_STAGING_BRANCH_REF).mock(return_value=httpx.Response(404))  # staging managed absent
+    respx.get(_MAIN_REF).mock(return_value=httpx.Response(200, json={"object": {"sha": "m"}}))
+    respx.get(_STAGING_REF).mock(return_value=httpx.Response(200, json={"object": {"sha": "s"}}))
+    create_ref = respx.post(_REFS).mock(return_value=httpx.Response(201, json={}))
+    _mock_commit()
+    respx.get(_PULLS).mock(return_value=httpx.Response(200, json=[]))  # no open PR on either head
+    create_pr = respx.post(_PULLS).mock(
+        return_value=httpx.Response(201, json={"html_url": "https://github.com/acme/widget/pull/1"})
+    )
+
+    managed = ManagedFile(path=_PATH, content=CONTENT, branches=["default", "staging"])
+    async with GitHub("token") as client:
+        results = await FileProvisioner(client).apply(TargetRepo("acme", "widget"), [managed])
+
+    assert {r.base for r in results} == {"main", "staging"}
+    assert all(r.applied and r.files == [_PATH] for r in results)
+    # Both managed branches were created, each from its own base branch...
+    created = {json.loads(c.request.content)["ref"] for c in create_ref.calls}
+    assert created == {f"refs/heads/{_BRANCH}", f"refs/heads/{_STAGING_BRANCH}"}
+    # ...and a PR was opened against each base branch from the matching head.
+    pr_bodies = [json.loads(c.request.content) for c in create_pr.calls]
+    assert {b["base"] for b in pr_bodies} == {"main", "staging"}
+    assert {b["head"] for b in pr_bodies} == {_BRANCH, _STAGING_BRANCH}
+
+
+@respx.mock
+async def test_missing_base_branch_skipped_while_default_provisions() -> None:
+    # branches=[default, staging] but the repo has no staging branch: the default branch
+    # still gets its PR; staging is skipped gracefully (no branch created, no PR opened).
+    _mock_repo()
+    respx.get(_CONTENTS).mock(return_value=httpx.Response(404))  # absent everywhere
+    _no_branch()
+    respx.get(_STAGING_COMPARE).mock(return_value=httpx.Response(404))
+    respx.get(_BRANCH_REF).mock(return_value=httpx.Response(404))
+    respx.get(_STAGING_BRANCH_REF).mock(return_value=httpx.Response(404))
+    respx.get(_MAIN_REF).mock(return_value=httpx.Response(200, json={"object": {"sha": "m"}}))
+    respx.get(_STAGING_REF).mock(return_value=httpx.Response(404))  # no staging branch in the repo
+    create_ref = respx.post(_REFS).mock(return_value=httpx.Response(201, json={}))
+    _mock_commit()
+    respx.get(_PULLS).mock(return_value=httpx.Response(200, json=[]))
+    create_pr = respx.post(_PULLS).mock(
+        return_value=httpx.Response(201, json={"html_url": "https://github.com/acme/widget/pull/1"})
+    )
+
+    managed = ManagedFile(path=_PATH, content=CONTENT, branches=["default", "staging"])
+    async with GitHub("token") as client:
+        results = await FileProvisioner(client).apply(TargetRepo("acme", "widget"), [managed])
+
+    by_base = {r.base: r for r in results}
+    assert by_base["main"].applied and by_base["main"].pr_url is not None
+    assert by_base["staging"].applied is False and by_base["staging"].changed is False
+    assert by_base["staging"].files == []  # nothing provisioned into the missing branch
+    # Only the default managed branch was created; only one PR opened, against main.
+    created = {json.loads(c.request.content)["ref"] for c in create_ref.calls}
+    assert created == {f"refs/heads/{_BRANCH}"}
+    assert create_pr.call_count == 1
+    assert json.loads(create_pr.calls.last.request.content)["base"] == "main"
+
+
+@respx.mock
+async def test_staging_only_file_never_touches_default_branch() -> None:
+    # branches=[staging] provisions only into staging; the default branch is left alone.
+    _mock_repo()
+    respx.get(_CONTENTS).mock(return_value=httpx.Response(404))
+    respx.get(_STAGING_COMPARE).mock(return_value=httpx.Response(404))
+    respx.get(_STAGING_BRANCH_REF).mock(return_value=httpx.Response(404))
+    respx.get(_STAGING_REF).mock(return_value=httpx.Response(200, json={"object": {"sha": "s"}}))
+    main_ref = respx.get(_MAIN_REF).mock(  # the default branch's base ref must never be read
+        return_value=httpx.Response(200, json={"object": {"sha": "m"}})
+    )
+    create_ref = respx.post(_REFS).mock(return_value=httpx.Response(201, json={}))
+    _mock_commit()
+    respx.get(_PULLS).mock(return_value=httpx.Response(200, json=[]))
+    create_pr = respx.post(_PULLS).mock(
+        return_value=httpx.Response(201, json={"html_url": "https://github.com/acme/widget/pull/1"})
+    )
+
+    managed = ManagedFile(path=_PATH, content=CONTENT, branches=["staging"])
+    async with GitHub("token") as client:
+        results = await FileProvisioner(client).apply(TargetRepo("acme", "widget"), [managed])
+
+    assert len(results) == 1 and results[0].base == "staging"
+    assert not main_ref.called  # only staging is provisioned; the default branch is untouched
+    created_ref = json.loads(create_ref.calls.last.request.content)["ref"]
+    assert created_ref == f"refs/heads/{_STAGING_BRANCH}"
+    assert json.loads(create_pr.calls.last.request.content)["base"] == "staging"
+
+
+@respx.mock
+async def test_multi_base_noop_when_matching_on_both() -> None:
+    # The file already matches on both base branches -> no commit on either managed branch.
+    _mock_repo()
+    respx.get(_CONTENTS).mock(return_value=_file(CONTENT))  # matches on every ref
+    _no_branch()
+    respx.get(_STAGING_COMPARE).mock(return_value=httpx.Response(404))
+    commit = _mock_commit()
+
+    managed = ManagedFile(path=_PATH, content=CONTENT, branches=["default", "staging"])
+    async with GitHub("token") as client:
+        results = await FileProvisioner(client).apply(TargetRepo("acme", "widget"), [managed])
+
+    assert {r.base for r in results} == {"main", "staging"}
+    assert all(r.changed is False for r in results)
+    assert not commit.called  # nothing to do on either base
+
+
+@respx.mock
+async def test_reconcile_tags_each_base_in_dry_run() -> None:
+    # The reconcile adapter emits one TierResult per base, tagged with the base branch when
+    # more than one is in play, so the dry-run Check Run distinguishes the two PRs.
+    _mock_repo()
+    respx.get(_CONTENTS).mock(return_value=httpx.Response(404))  # absent -> would be provisioned
+    _no_branch()
+    respx.get(_STAGING_COMPARE).mock(return_value=httpx.Response(404))
+
+    config = SafeSettingsConfig(
+        files=[ManagedFile(path=_PATH, content=CONTENT, branches=["default", "staging"])]
+    )
+    async with GitHub("token") as client:
+        rows = await reconcile(client, TargetRepo("acme", "widget"), config, dry_run=True)
+
+    assert [r.tier for r in rows] == ["files", "files"]
+    by_tag = {r.notes[0]: r for r in rows}  # the first note is the base tag when multi-base
+    assert set(by_tag) == {"base: main", "base: staging"}
+    assert all(_PATH in r.notes for r in rows)
+    assert all(r.changed and not r.applied for r in rows)  # dry-run: drift detected, not applied
