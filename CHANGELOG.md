@@ -2,6 +2,20 @@
 
 <!-- version list -->
 
+## v1.13.1 (2026-07-01)
+
+### Bug Fixes
+
+- **files**: Name per-base managed branches as siblings, not nested paths
+  ([#40](https://github.com/MagmaMoose/caldrith/pull/40),
+  [`fc65edd`](https://github.com/MagmaMoose/caldrith/commit/fc65edd6c3eba79beac74beab1dbbfb3f6e8dd5b))
+
+### Chores
+
+- Update caldrith image
+  ([`c045b3a`](https://github.com/MagmaMoose/caldrith/commit/c045b3a80c44b42a5dfdea0ffba3a32bc7ce0428))
+
+
 ## v1.13.0 (2026-07-01)
 
 ### Chores

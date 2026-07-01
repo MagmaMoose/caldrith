@@ -1,6 +1,6 @@
 [project]
 name = "caldrith"
-version = "1.13.0"
+version = "1.13.1"
 description = "A public, multi-tenant GitHub App that enforces GitHub configuration-as-code (modeled on github/safe-settings)."
 readme = "README.md"
 requires-python = ">=3.12"
@@ -25,6 +25,7 @@ dependencies = [
 [project.urls]
 Homepage = "https://github.com/MagmaMoose/caldrith"
 Source = "https://github.com/MagmaMoose/caldrith"
+
 
 
 
@@ -80,6 +81,7 @@ patch_tags = ["fix", "perf"]
 
 [tool.semantic_release.remote]
 type = "github"
+
 
 
 [dependency-groups]
