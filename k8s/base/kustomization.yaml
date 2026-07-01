@@ -5,6 +5,5 @@ resources:
   - deployment-worker.yaml
   - service.yaml
   - externalsecret.yaml
-  - externalsecret-manual-trigger.yaml
   - ghcr-pull-secret.yaml
   - ingress.yaml
