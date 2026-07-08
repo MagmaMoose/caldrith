@@ -110,7 +110,31 @@ async def test_org_actions_drift_puts_permissions() -> None:
     assert put.called
     actions = next(r for r in summary.results if r.tier == "org_actions")
     assert actions.changed is True
+    assert actions.applied is True
     assert summary.any_changed is True
+
+
+@respx.mock
+async def test_org_actions_dry_run_reports_without_applying() -> None:
+    _mock_settings(
+        "organization:\n  actions:\n    enabled_repositories: all\n    allowed_actions: all\n"
+    )
+    _mock_installation()
+    respx.get(f"{API}/orgs/acme").mock(return_value=httpx.Response(200, json={"login": "acme"}))
+    respx.get(f"{API}/orgs/acme/actions/permissions").mock(
+        return_value=httpx.Response(
+            200, json={"enabled_repositories": "none", "allowed_actions": "local_only"}
+        )
+    )
+    put = respx.put(f"{API}/orgs/acme/actions/permissions").mock(return_value=httpx.Response(204))
+
+    async with GitHub("token") as client:
+        summary = await run_org_reconcile(client, installation_id=42, owner="acme", dry_run=True)
+
+    assert not put.called
+    actions = next(r for r in summary.results if r.tier == "org_actions")
+    assert actions.changed is True
+    assert actions.applied is False
 
 
 @respx.mock
@@ -138,5 +162,6 @@ async def test_org_ruleset_create() -> None:
     assert post.called
     rulesets = next(r for r in summary.results if r.tier == "org_rulesets")
     assert rulesets.changed is True
+    assert rulesets.applied is True
     assert "create:default" in rulesets.notes
     assert summary.any_changed is True
