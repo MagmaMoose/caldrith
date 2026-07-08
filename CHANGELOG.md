@@ -2,6 +2,95 @@
 
 <!-- version list -->
 
+## v1.13.1 (2026-07-01)
+
+### Bug Fixes
+
+- **files**: Name per-base managed branches as siblings, not nested paths
+  ([#40](https://github.com/MagmaMoose/caldrith/pull/40),
+  [`fc65edd`](https://github.com/MagmaMoose/caldrith/commit/fc65edd6c3eba79beac74beab1dbbfb3f6e8dd5b))
+
+### Chores
+
+- Update caldrith image
+  ([`c045b3a`](https://github.com/MagmaMoose/caldrith/commit/c045b3a80c44b42a5dfdea0ffba3a32bc7ce0428))
+
+
+## v1.13.0 (2026-07-01)
+
+### Chores
+
+- Update caldrith image
+  ([`a941e35`](https://github.com/MagmaMoose/caldrith/commit/a941e359c024761164912772dcb8e5bac76b7a8b))
+
+### Features
+
+- **files**: Provision managed files into multiple base branches
+  ([#39](https://github.com/MagmaMoose/caldrith/pull/39),
+  [`1ae0987`](https://github.com/MagmaMoose/caldrith/commit/1ae0987e6f1f6854ff9c99827fe19b3e6222001c))
+
+
+## v1.12.2 (2026-07-01)
+
+### Bug Fixes
+
+- **k8s**: Make manual-trigger secret opt-in ([#38](https://github.com/MagmaMoose/caldrith/pull/38),
+  [`3b016c9`](https://github.com/MagmaMoose/caldrith/commit/3b016c924c43168bb1ad3309b3086b6cbc51223a))
+
+### Build System
+
+- **deps**: Bump the github-actions group across 1 directory with 2 updates
+  ([#34](https://github.com/MagmaMoose/caldrith/pull/34),
+  [`62a71c0`](https://github.com/MagmaMoose/caldrith/commit/62a71c06ee31345ef8474dc815cec3205fcad287))
+
+### Chores
+
+- Update caldrith image
+  ([`cd2f478`](https://github.com/MagmaMoose/caldrith/commit/cd2f478a39dfd755bcf6cc398564cf25ac228331))
+
+
+## v1.12.1 (2026-07-01)
+
+### Bug Fixes
+
+- **worker,api**: Isolate ARQ on a Caldrith-specific queue
+  ([#32](https://github.com/MagmaMoose/caldrith/pull/32),
+  [`bcbc8a3`](https://github.com/MagmaMoose/caldrith/commit/bcbc8a33acefcafe2a5e21297764dc145312f0c5))
+
+### Chores
+
+- Update caldrith image
+  ([`5df73ea`](https://github.com/MagmaMoose/caldrith/commit/5df73eaaa369a5b2e57c41959c0e836267cf92fb))
+
+
+## v1.12.0 (2026-06-27)
+
+### Chores
+
+- Update caldrith image
+  ([`18f8477`](https://github.com/MagmaMoose/caldrith/commit/18f8477a8a91b169496cf4e886b5016b2b1a9c08))
+
+### Features
+
+- **webhooks**: Re-base admin repo's open PRs on settings change
+  ([#37](https://github.com/MagmaMoose/caldrith/pull/37),
+  [`8b27985`](https://github.com/MagmaMoose/caldrith/commit/8b27985bde03d2363886af7fb72102dcc9ef904d))
+
+
+## v1.11.2 (2026-06-27)
+
+### Bug Fixes
+
+- **ci**: Build multi-arch (amd64+arm64) images
+  ([#35](https://github.com/MagmaMoose/caldrith/pull/35),
+  [`aed6a18`](https://github.com/MagmaMoose/caldrith/commit/aed6a18978700e8b19d779c63412cb0093463ef7))
+
+### Chores
+
+- Update caldrith image
+  ([`e396cd8`](https://github.com/MagmaMoose/caldrith/commit/e396cd81b4cb90bdd2d6d7372a38a44eaa421260))
+
+
 ## v1.11.1 (2026-06-24)
 
 ### Bug Fixes

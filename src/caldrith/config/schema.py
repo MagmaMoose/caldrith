@@ -262,6 +262,13 @@ class ManagedFile(BaseModel):
     ``skip_repos`` is a list of repo-name globs to exclude from THIS file only — a
     per-file escape hatch that, unlike ``restrictedRepos``, leaves the repo under all
     other Caldrith management.
+
+    ``branches`` lists the base branches the file is provisioned into, each via its own
+    managed PR. The ``"default"`` sentinel means the repo's default branch (whatever it
+    is named); omitted, ``branches`` defaults to ``["default"]`` — the default branch
+    only — so existing configs are unchanged. ``["default", "staging"]`` rolls the file
+    out to both the default branch and ``staging``; a repo missing a listed branch is
+    skipped for that branch alone, not for the others.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -271,6 +278,7 @@ class ManagedFile(BaseModel):
     create_only: bool = False
     upgrade_only: bool = False
     skip_repos: list[str] | None = None
+    branches: list[str] | None = None
 
 
 # ---------------------------------------------------------------------------

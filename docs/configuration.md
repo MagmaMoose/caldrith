@@ -979,12 +979,15 @@ pages:
 
 A `files:` list makes Caldrith **provision files into every managed repo via a
 pull request** — the way required workflows (the Chargate gate, a Diatreme release)
-get rolled out org-wide. Caldrith never pushes to the default branch directly: it
-opens (and reuses) one PR per repo from a stable `ci/caldrith/managed-files` branch.
+get rolled out org-wide. Caldrith never pushes to a base branch directly: it opens
+(and reuses) one managed PR per repo **per target base branch** — from a stable
+`ci/caldrith/managed-files` branch for the default branch, or
+`ci/caldrith/managed-files-<base>` for another base such as `staging`.
 
 ```yaml
 files:
   - path: .github/workflows/security.yml
+    branches: [default, staging]   # roll this workflow out to the default branch AND staging
     content: |
       name: Security
       on: { pull_request: {}, push: { branches: [main] } }
@@ -1009,6 +1012,14 @@ files:
   `restrictedRepos` (which drops a repo from *all* management), this is a per-file escape
   hatch — use it for a repo whose copy is intentionally bespoke (e.g. chargate's
   self-referential security workflow that calls its own local gate).
+- **`branches`**: the base branches this file is provisioned into, **each via its own
+  managed PR**. The `default` sentinel means the repo's default branch (whatever it is
+  named); omitted, `branches` is `[default]` — the default branch only, so existing
+  configs are unchanged. `["default", "staging"]` opens two PRs — one into the default
+  branch, one into `staging`; a repo that lacks a listed branch is skipped for that
+  branch alone, not the others. The default branch keeps the stable
+  `ci/caldrith/managed-files` branch name (existing PRs untouched); any other base uses
+  `ci/caldrith/managed-files-<base>`.
 
 Idempotent and non-destructive: files already matching are skipped, the PR branch is
 reused, and an open PR is never duplicated — so re-running while a PR is pending does
@@ -1017,9 +1028,9 @@ nothing. An **empty repository** (no commit on its default branch) is skipped gr
 
 **Pruning.** When you drop a file from `files:` (or add a repo to its `skip_repos`),
 Caldrith removes it from the provisioning PR on the next reconcile so the PR reflects
-only the currently-required files. It only ever edits its own `ci/caldrith/managed-files`
-branch: a file it had added net-new is deleted; a repo file it had merely updated is
-reverted to the default branch's version (the repo's own files are never removed). If
+only the currently-required files. It only ever edits its own managed branch: a file it
+had added net-new is deleted; a repo file it had merely updated is reverted to the base
+branch's version (the repo's own files are never removed). If
 pruning leaves nothing to provision, the now-empty PR is **closed and its branch
 deleted** rather than left dangling.
 
@@ -1045,6 +1056,7 @@ deleted** rather than left dangling.
 | `create_only` | `false` | When `true`, provision only when absent and never overwrite; a `.yml`/`.yaml` sibling counts as present. |
 | `upgrade_only` | `false` | When `true`, never **downgrade** a SHA-pinned action: if the repo pins any action this file declares (`uses: owner/repo@<sha> # vX.Y.Z`) at a *newer* version, the file is left as-is. |
 | `skip_repos` | — | Repo-name globs to exclude THIS file from (a matched repo is skipped and any prior managed copy pruned). |
+| `branches` | `[default]` | Base branches to provision into, each via its own managed PR; the `default` sentinel = the repo's default branch. E.g. `[default, staging]`. A repo missing a listed branch is skipped for that branch alone. |
 
 !!! tip "`upgrade_only` — don't fight Dependabot / Renovate"
     A synced file (not `create_only`) is normally rewritten to `content` on any drift — so

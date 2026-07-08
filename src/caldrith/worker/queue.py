@@ -14,6 +14,15 @@ from typing import Any, Protocol
 DEDUP_TTL_SECONDS = 24 * 60 * 60
 _DEDUP_KEY_PREFIX = "caldrith:delivery:"
 
+# ARQ queue name — MUST be Caldrith-specific. ARQ defaults every app to the queue
+# ``arq:queue``; when another ARQ app shares the same Redis (e.g. a sibling service on a
+# central Valkey), the two workers poll the *same* default queue and pop each other's
+# jobs, failing them with ``JobExecutionFailed("function '...' not found")``. Namespacing
+# the queue isolates Caldrith's jobs to Caldrith's worker. The producer (API pool), the
+# consumer (``WorkerSettings.queue_name``), and every ``enqueue_job`` MUST agree on this
+# name — including the worker's own fan-out, whose pool does not inherit the name.
+ARQ_QUEUE_NAME = "caldrith:arq:queue"
+
 
 class SupportsSetNX(Protocol):
     """Minimal Redis surface used for dedup (satisfied by redis.asyncio + fakeredis)."""
@@ -55,6 +64,7 @@ async def enqueue_reconcile_installation(
         "reconcile_installation",
         installation_id=installation_id,
         owner=owner,
+        _queue_name=ARQ_QUEUE_NAME,
     )
 
 
@@ -75,6 +85,7 @@ async def enqueue_reconcile_repo(
         repo=repo,
         dry_run=dry_run,
         head_sha=head_sha,
+        _queue_name=ARQ_QUEUE_NAME,
     )
 
 
@@ -89,4 +100,20 @@ async def enqueue_reconcile_org(
         "reconcile_org",
         installation_id=installation_id,
         owner=owner,
+        _queue_name=ARQ_QUEUE_NAME,
+    )
+
+
+async def enqueue_update_admin_prs(
+    arq_redis: Any,
+    *,
+    installation_id: int,
+    owner: str,
+) -> None:
+    """Enqueue a sweep that re-bases the admin repo's open PRs onto the new baseline."""
+    await arq_redis.enqueue_job(
+        "update_admin_prs",
+        installation_id=installation_id,
+        owner=owner,
+        _queue_name=ARQ_QUEUE_NAME,
     )

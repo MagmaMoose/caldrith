@@ -1,9 +1,12 @@
 """Provision required files (workflows) into a repo via a pull request.
 
-Caldrith never pushes to the default branch directly — it opens (and reuses) a single
-PR from a stable branch (``ci/caldrith/managed-files``) that adds, updates, and prunes
-the declared files, so a human/automation merges it. This is how required workflows
-(the Chargate gate, a Diatreme release) get rolled out org-wide.
+Caldrith never pushes to a base branch directly — it opens (and reuses) a managed PR
+from a stable branch (``ci/caldrith/managed-files`` for the default branch, or
+``ci/caldrith/managed-files-<base>`` for another base such as ``staging``) that adds,
+updates, and prunes the declared files, so a human/automation merges it. A file's
+``branches`` selects the base branches it targets (default: the repo's default branch),
+and each base gets its own managed PR. This is how required workflows (the Chargate
+gate, a Diatreme release) get rolled out org-wide.
 
 A run's adds, updates and prunes go into **one commit**, authored through the GraphQL
 ``createCommitOnBranch`` mutation so GitHub signs it on the App's behalf — the managed
@@ -11,7 +14,7 @@ PR's commits show as **Verified**. (The REST contents API does not sign a third-
 App's commits, so they would otherwise show as unverified.)
 
 Idempotent and non-destructive:
-- A file already matching ``content`` on the default branch is skipped.
+- A file already matching ``content`` on its base branch is skipped.
 - ``create_only`` files are written only when absent (never overwrite a repo's own),
   and a ``.yml``/``.yaml`` sibling counts as present — so a managed ``release.yaml``
   won't be added next to a repo's existing ``release.yml``.
@@ -26,8 +29,8 @@ Idempotent and non-destructive:
 - Files the branch still carries that the config no longer declares — a workflow
   dropped from ``settings.yml``, or a repo newly matched by ``skip_repos`` — are pruned
   so the PR reflects only the currently-required files. Caldrith touches only its own
-  ``ci/caldrith/managed-files`` branch: a file it added net-new is deleted, and a repo
-  file it had merely updated is reverted to the default branch's version — the repo's
+  managed branch: a file it added net-new is deleted, and a repo file it had merely
+  updated is reverted to the base branch's version — the repo's
   own files are never removed. If pruning leaves nothing to provision, the now-empty PR
   is closed and the branch deleted rather than left dangling. Boundary: removing the
   *last* managed file (an empty or absent ``files:`` block) skips the files tier
@@ -51,6 +54,10 @@ from caldrith.reconcile.planner import TargetRepo
 from caldrith.reconcile.selection import matches_any
 
 _BRANCH = "ci/caldrith/managed-files"
+# Sentinel in a file's ``branches`` meaning "this repo's default branch" (whatever it is
+# named). Managed PRs into the default branch keep the stable ``_BRANCH`` name; any other
+# base gets a ``_BRANCH-<base>`` sibling branch, so each base branch has its own managed PR.
+_DEFAULT_BASE = "default"
 _COMMIT_MESSAGE = "chore: provision required workflows (caldrith)"
 _PR_TITLE = "Caldrith: provision required workflows"
 _PR_BODY = (
@@ -120,11 +127,46 @@ def _repo_is_ahead(repo_content: str, admin_content: str) -> bool:
     )
 
 
+def _managed_branch(base: str, default_branch: str) -> str:
+    """The managed PR branch name for a given ``base`` branch.
+
+    The default branch keeps the stable ``ci/caldrith/managed-files`` name (so an existing
+    managed PR stays untouched); any other base gets a ``ci/caldrith/managed-files-<base>``
+    *sibling* — one managed PR per base branch.
+
+    The separator is a hyphen, NOT ``/``, on purpose. ``ci/caldrith/managed-files/<base>``
+    would be a child path of the default branch, and Git cannot hold both a ref and another
+    ref nested under it (a directory/file conflict): once ``ci/caldrith/managed-files``
+    exists, creating ``ci/caldrith/managed-files/staging`` fails with ``cannot lock ref``
+    (HTTP 422), so that base would silently never be provisioned. Any ``/`` inside ``base``
+    is flattened to ``-`` for the same reason.
+    """
+    if base == default_branch:
+        return _BRANCH
+    return f"{_BRANCH}-{base.replace('/', '-')}"
+
+
+def _resolve_bases(managed: ManagedFile, default_branch: str) -> list[str]:
+    """The distinct base branches ``managed`` targets, resolving the ``default`` sentinel.
+
+    An unset ``branches`` targets the repo's default branch only (backward-compatible); the
+    ``"default"`` keyword resolves to it, so ``["default", "staging"]`` targets both. The
+    result is order-preserving and de-duplicated (a default branch listed both as
+    ``"default"`` and by name is provisioned once).
+    """
+    raw = managed.branches if managed.branches is not None else [_DEFAULT_BASE]
+    resolved: dict[str, None] = {}
+    for name in raw:
+        resolved.setdefault(default_branch if name == _DEFAULT_BASE else name, None)
+    return list(resolved)
+
+
 @dataclass
 class FilesResult:
-    """Outcome of provisioning managed files into a repo."""
+    """Outcome of provisioning managed files into one repo, for one base branch."""
 
     repo: str
+    base: str = ""  # the base branch this managed PR targets (the repo's default unless set)
     files: list[str] = field(default_factory=list)  # paths created/updated this run
     removed: list[str] = field(default_factory=list)  # paths pruned from the branch
     pr_url: str | None = None
@@ -174,7 +216,7 @@ class FileProvisioner:
         )
         return repo.get("default_branch") or "main"
 
-    async def _ensure_branch(self, target: TargetRepo, base: str) -> str | None:
+    async def _ensure_branch(self, target: TargetRepo, base: str, branch: str) -> str | None:
         """Ensure the managed PR branch exists and return its head commit OID.
 
         Creates the branch from ``base`` HEAD if missing. Returns ``None`` when there is
@@ -185,7 +227,7 @@ class FileProvisioner:
         try:
             ref = response_json(
                 await self._client.rest.git.async_get_ref(
-                    owner=target.owner, repo=target.name, ref=f"heads/{_BRANCH}"
+                    owner=target.owner, repo=target.name, ref=f"heads/{branch}"
                 )
             )
             return ref["object"]["sha"]  # already exists — reuse it
@@ -203,18 +245,69 @@ class FileProvisioner:
                 return None  # empty repo: the default branch has no commit
             raise
         sha = base_ref["object"]["sha"]
-        await self._client.rest.git.async_create_ref(
-            owner=target.owner,
-            repo=target.name,
-            data={"ref": f"refs/heads/{_BRANCH}", "sha": sha},
-        )
+        await self._create_branch_ref(target, branch, sha)
         return sha
 
-    async def _ensure_pr(self, target: TargetRepo, base: str) -> str:
-        """Return the URL of the managed PR, opening one if none is open."""
+    async def _create_branch_ref(self, target: TargetRepo, branch: str, sha: str) -> None:
+        """Create ``refs/heads/{branch}`` at ``sha``, self-healing a directory/file conflict.
+
+        A ref left nested under ``refs/heads/{branch}/`` — from Caldrith's retired
+        ``ci/caldrith/managed-files/<base>`` slash naming (see :func:`_managed_branch`) —
+        makes ``{branch}`` a *directory* in the ref store, so creating the flat ref 422s
+        with ``cannot lock ref``. Unhandled, that aborts the repo's whole files tier (the
+        default base is provisioned first, in :meth:`apply`), so *no* managed PR opens for
+        *any* base and the repo silently falls out of sync. On that 422, drop the stale
+        nested refs (Caldrith's own, hence safe) and retry once; a 422 from any other cause,
+        or one that leaves nothing to delete, is re-raised unchanged.
+        """
+        data = {"ref": f"refs/heads/{branch}", "sha": sha}
+        try:
+            await self._client.rest.git.async_create_ref(
+                owner=target.owner, repo=target.name, data=data
+            )
+            return
+        except RequestFailed as exc:
+            if exc.response.status_code != 422:
+                raise
+            if not await self._delete_nested_refs(target, branch):
+                raise  # not the slash-branch conflict — surface the original 422
+        await self._client.rest.git.async_create_ref(
+            owner=target.owner, repo=target.name, data=data
+        )
+
+    async def _delete_nested_refs(self, target: TargetRepo, branch: str) -> list[str]:
+        """Delete Caldrith's own refs nested under ``refs/heads/{branch}/``; return their names.
+
+        These are leftovers from the retired ``ci/caldrith/managed-files/<base>`` slash
+        naming. They live inside Caldrith's own ``ci/caldrith/managed-files`` namespace —
+        never a user branch — so dropping them is safe, and it auto-closes any superseded
+        stale managed PR. The strict ``refs/heads/{branch}/`` prefix filter matches only
+        true children, so a ``{branch}-<base>`` *hyphen* sibling (the current scheme) is
+        never touched even though it shares the ``{branch}`` string prefix.
+        """
+        nested_prefix = f"refs/heads/{branch}/"
+        matched = response_json(
+            await self._client.rest.git.async_list_matching_refs(
+                owner=target.owner, repo=target.name, ref=f"heads/{branch}"
+            )
+        )
+        deleted: list[str] = []
+        for entry in matched:
+            full_ref = entry.get("ref", "")
+            if not full_ref.startswith(nested_prefix):
+                continue  # the flat ref itself, or a `{branch}-<base>` hyphen sibling
+            name = full_ref.removeprefix("refs/")  # heads/ci/caldrith/managed-files/staging
+            await self._client.rest.git.async_delete_ref(
+                owner=target.owner, repo=target.name, ref=name
+            )
+            deleted.append(name)
+        return deleted
+
+    async def _ensure_pr(self, target: TargetRepo, base: str, branch: str) -> str:
+        """Return the URL of the managed PR for ``branch``, opening one if none is open."""
         existing = response_json(
             await self._client.rest.pulls.async_list(
-                owner=target.owner, repo=target.name, head=f"{target.owner}:{_BRANCH}", state="open"
+                owner=target.owner, repo=target.name, head=f"{target.owner}:{branch}", state="open"
             )
         )
         if existing:
@@ -223,12 +316,12 @@ class FileProvisioner:
             await self._client.rest.pulls.async_create(
                 owner=target.owner,
                 repo=target.name,
-                data={"title": _PR_TITLE, "head": _BRANCH, "base": base, "body": _PR_BODY},
+                data={"title": _PR_TITLE, "head": branch, "base": base, "body": _PR_BODY},
             )
         )
         return created["html_url"]
 
-    async def _close_branch(self, target: TargetRepo) -> list[str]:
+    async def _close_branch(self, target: TargetRepo, branch: str) -> list[str]:
         """Delete the managed branch and close its PR; return the closed PR URL(s).
 
         Used when pruning has left nothing to provision (the branch would equal the
@@ -243,12 +336,12 @@ class FileProvisioner:
         """
         open_prs = response_json(
             await self._client.rest.pulls.async_list(
-                owner=target.owner, repo=target.name, head=f"{target.owner}:{_BRANCH}", state="open"
+                owner=target.owner, repo=target.name, head=f"{target.owner}:{branch}", state="open"
             )
         )
         try:
             await self._client.rest.git.async_delete_ref(
-                owner=target.owner, repo=target.name, ref=f"heads/{_BRANCH}"
+                owner=target.owner, repo=target.name, ref=f"heads/{branch}"
             )
         except RequestFailed as exc:
             if exc.response.status_code != 404:
@@ -266,7 +359,7 @@ class FileProvisioner:
         return closed
 
     async def _orphans(
-        self, target: TargetRepo, base: str, desired: set[str]
+        self, target: TargetRepo, base: str, branch: str, desired: set[str]
     ) -> list[tuple[str, str]]:
         """Return ``(path, status)`` for files the branch carries that ``desired`` omits.
 
@@ -279,7 +372,7 @@ class FileProvisioner:
         try:
             comparison = response_json(
                 await self._client.rest.repos.async_compare_commits(
-                    owner=target.owner, repo=target.name, basehead=f"{base}...{_BRANCH}"
+                    owner=target.owner, repo=target.name, basehead=f"{base}...{branch}"
                 )
             )
         except RequestFailed as exc:
@@ -297,6 +390,7 @@ class FileProvisioner:
         self,
         target: TargetRepo,
         base: str,
+        branch: str,
         needed: list[ManagedFile],
         orphans: list[tuple[str, str]],
     ) -> tuple[list[dict[str, str]], list[dict[str, str]]]:
@@ -312,12 +406,12 @@ class FileProvisioner:
         additions: list[dict[str, str]] = []
         deletions: list[dict[str, str]] = []
         for managed in needed:
-            branch_content, _ = await self._get_file(target, managed.path, _BRANCH)
+            branch_content, _ = await self._get_file(target, managed.path, branch)
             if branch_content == managed.content:
                 continue  # already staged on the branch
             additions.append({"path": managed.path, "contents": _b64(managed.content)})
         for path, status in orphans:
-            branch_content, blob_sha = await self._get_file(target, path, _BRANCH)
+            branch_content, blob_sha = await self._get_file(target, path, branch)
             if blob_sha is None:
                 continue  # already absent on the branch
             if status == "added":
@@ -333,6 +427,7 @@ class FileProvisioner:
     async def _commit_on_branch(
         self,
         target: TargetRepo,
+        branch: str,
         head_oid: str,
         additions: list[dict[str, str]],
         deletions: list[dict[str, str]],
@@ -355,7 +450,7 @@ class FileProvisioner:
                 "input": {
                     "branch": {
                         "repositoryNameWithOwner": target.full_name,
-                        "branchName": _BRANCH,
+                        "branchName": branch,
                     },
                     "message": {"headline": _COMMIT_MESSAGE},
                     "expectedHeadOid": head_oid,
@@ -364,15 +459,38 @@ class FileProvisioner:
             },
         )
 
-    async def apply(self, target: TargetRepo, files: list[ManagedFile]) -> FilesResult:
-        """Provision ``files`` into ``target`` via a PR (unless dry-run).
+    async def apply(self, target: TargetRepo, files: list[ManagedFile]) -> list[FilesResult]:
+        """Provision ``files`` into ``target`` via one managed PR per target base branch.
 
-        Adds/updates the declared files and prunes any the branch still carries from a
-        previous run that the config no longer declares, so the PR reflects exactly the
-        currently-required files.
+        Each file targets one or more base branches (its ``branches``; the ``"default"``
+        sentinel is the repo's default branch, and an unset ``branches`` means the default
+        branch only). Files are grouped by resolved base branch and each base is
+        provisioned independently — into its own ``ci/caldrith/managed-files`` (default
+        branch) or ``ci/caldrith/managed-files-<base>`` PR — so a repo missing a listed
+        base branch is skipped for that base without affecting the others. Returns one
+        :class:`FilesResult` per base processed.
         """
-        result = FilesResult(repo=target.full_name)
         default_branch = await self._default_branch(target)
+        by_base: dict[str, list[ManagedFile]] = {}
+        for managed in files:
+            for base in _resolve_bases(managed, default_branch):
+                by_base.setdefault(base, []).append(managed)
+        return [
+            await self._apply_for_base(target, base, default_branch, base_files)
+            for base, base_files in by_base.items()
+        ]
+
+    async def _apply_for_base(
+        self, target: TargetRepo, base: str, default_branch: str, files: list[ManagedFile]
+    ) -> FilesResult:
+        """Provision ``files`` into ``target`` against one ``base`` branch (unless dry-run).
+
+        Adds/updates the declared files and prunes any the managed branch still carries from
+        a previous run that the config no longer declares, so the PR reflects exactly the
+        currently-required files for this base.
+        """
+        branch = _managed_branch(base, default_branch)
+        result = FilesResult(repo=target.full_name, base=base)
 
         desired: set[str] = set()
         needed: list[ManagedFile] = []
@@ -380,11 +498,9 @@ class FileProvisioner:
             if matches_any(target.name, managed.skip_repos):
                 continue  # excluded from this repo -> not provisioned (and pruned if present)
             desired.add(managed.path)
-            content, _ = await self._get_file(target, managed.path, default_branch)
+            content, _ = await self._get_file(target, managed.path, base)
             if content is None:
-                if managed.create_only and await self._sibling_present(
-                    target, managed.path, default_branch
-                ):
+                if managed.create_only and await self._sibling_present(target, managed.path, base):
                     continue  # a .yml/.yaml variant already exists — don't duplicate it
                 needed.append(managed)  # absent -> create
             elif content != managed.content and not managed.create_only:
@@ -392,7 +508,7 @@ class FileProvisioner:
                     continue  # a bot bumped a pinned version past the baseline — don't downgrade
                 needed.append(managed)  # drifted -> update (create_only files are left alone)
 
-        orphans = await self._orphans(target, default_branch, desired)
+        orphans = await self._orphans(target, base, branch, desired)
 
         if not needed and not orphans:
             return result  # repo already compliant and the branch carries nothing stale
@@ -403,24 +519,25 @@ class FileProvisioner:
 
         if not needed:
             # Nothing left to provision (every branch change is now an orphan), so the
-            # branch would equal the default branch: close the PR and drop the branch
-            # rather than per-file prune only to leave an empty PR. Reached only when
-            # orphans is non-empty (the all-compliant case returned above).
-            closed = await self._close_branch(target)
+            # branch would equal its base: close the PR and drop the branch rather than
+            # per-file prune only to leave an empty PR. Reached only when orphans is
+            # non-empty (the all-compliant case returned above).
+            closed = await self._close_branch(target, branch)
             result.closed_pr_url = closed[0] if closed else None
             result.applied = True
             return result
 
-        head_oid = await self._ensure_branch(target, default_branch)
+        head_oid = await self._ensure_branch(target, base, branch)
         if head_oid is None:
-            # Empty repository: no base commit to branch a PR from. Skip gracefully.
+            # No base commit to branch a PR from — an empty repository, or a repo that
+            # lacks this base branch (e.g. no ``staging``). Skip this base gracefully.
             result.files = []
             result.removed = []
             return result
-        additions, deletions = await self._build_changes(target, default_branch, needed, orphans)
+        additions, deletions = await self._build_changes(target, base, branch, needed, orphans)
         if additions or deletions:
-            await self._commit_on_branch(target, head_oid, additions, deletions)
-        result.pr_url = await self._ensure_pr(target, default_branch)
+            await self._commit_on_branch(target, branch, head_oid, additions, deletions)
+        result.pr_url = await self._ensure_pr(target, base, branch)
         result.applied = True
         return result
 
@@ -428,25 +545,32 @@ class FileProvisioner:
 async def reconcile(
     client: GitHub, target: TargetRepo, config: RepoScoped, *, dry_run: bool = False
 ) -> list[TierResult]:
-    """Uniform adapter: provision managed files into one repo (via PR)."""
+    """Uniform adapter: provision managed files into one repo — one row per base branch."""
     if not config.files:
         return []
-    result = await FileProvisioner(client, dry_run=dry_run).apply(target, config.files)
-    notes = list(result.files)
-    notes.extend(f"-{path}" for path in result.removed)
-    if result.pr_url:
-        notes.append(f"PR: {result.pr_url}")
-    if result.closed_pr_url:
-        notes.append(f"closed PR: {result.closed_pr_url}")
-    return [
-        TierResult(
-            tier="files",
-            scope=result.repo,
-            changed=result.changed,
-            applied=result.applied,
-            notes=notes,
+    results = await FileProvisioner(client, dry_run=dry_run).apply(target, config.files)
+    # Only tag rows with their base branch when more than one base is in play, so the
+    # common single-base Check Run summary is unchanged.
+    multi_base = len(results) > 1
+    rows: list[TierResult] = []
+    for result in results:
+        notes = [f"base: {result.base}"] if multi_base else []
+        notes.extend(result.files)
+        notes.extend(f"-{path}" for path in result.removed)
+        if result.pr_url:
+            notes.append(f"PR: {result.pr_url}")
+        if result.closed_pr_url:
+            notes.append(f"closed PR: {result.closed_pr_url}")
+        rows.append(
+            TierResult(
+                tier="files",
+                scope=result.repo,
+                changed=result.changed,
+                applied=result.applied,
+                notes=notes,
+            )
         )
-    ]
+    return rows
 
 
 TIER = RepoTier(name="files", configured=lambda c: bool(c.files), reconcile=reconcile)

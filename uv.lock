@@ -135,7 +135,7 @@ wheels = [
 
 [[package]]
 name = "caldrith"
-version = "1.4.2"
+version = "1.12.0"
 source = { editable = "." }
 dependencies = [
     { name = "arq" },

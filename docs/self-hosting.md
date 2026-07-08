@@ -81,6 +81,11 @@ reconcile for one or every installation; returns immediately (the work runs in t
 worker). 401 on a bad/missing token, 404 when the env var is unset (the endpoint isn't
 advertised).
 
+In the bundled Kubernetes manifests, the manual-trigger `ExternalSecret` is intentionally
+not part of the default base because a missing vault key makes Flux wait on the optional
+secret. After creating the `caldrith-manual-trigger-token` vault entry, apply
+`k8s/optional/manual-trigger` with the same namespace as the main deployment.
+
 ```sh
 # Set MANUAL_TRIGGER_TOKEN in the env, then:
 curl -X POST https://caldrith.example.com/reconcile \
