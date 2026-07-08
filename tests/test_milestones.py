@@ -151,3 +151,28 @@ async def test_dry_run_never_writes() -> None:
     result = results[0]
     assert result.changed is True
     assert result.applied is False
+
+
+@respx.mock
+async def test_due_on_date_matches_github_snapped_timestamp() -> None:
+    # GitHub snaps a milestone due_on to a fixed time-of-day and echoes a full timestamp
+    # (send "2024-01-01" -> API returns "2024-01-01T08:00:00Z"). A date-only desired value
+    # must NOT read as drift, or the tier re-PATCHes on every reconcile (non-idempotent).
+    respx.get(_MILESTONES).mock(
+        return_value=httpx.Response(
+            200, json=[_milestone(7, "v1.0", due_on="2024-01-01T08:00:00Z")]
+        )
+    )
+    post = respx.post(_MILESTONES).mock(return_value=httpx.Response(201, json={}))
+    patch = respx.patch(url__startswith=f"{_MILESTONES}/").mock(
+        return_value=httpx.Response(200, json={})
+    )
+
+    async with GitHub("token") as client:
+        results = await milestones.reconcile(
+            client, _TARGET, _config([{"title": "v1.0", "due_on": "2024-01-01"}])
+        )
+
+    assert not patch.called
+    assert not post.called
+    assert results[0].changed is False
