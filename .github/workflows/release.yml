@@ -59,20 +59,15 @@ jobs:
           fi
       # PR: verify the image builds (image repos only).
       - if: github.event_name == 'pull_request' && steps.detect.outputs.image_name != ''
-        uses: magmamoose/diatreme@0659f96503421d14269b30b1374b7da8aa4f5dd9 # v2.3.0
+        uses: magmamoose/diatreme@f31adec7d62907cc81b9b880cd776e24fcdcbaf1 # v2.0.0
         with:
           mode: ci
-          # Build for arm64 too (OCI Ampere nodes), not just amd64. The bake file
-          # already defaults to both, but diatreme's platforms input defaults to
-          # linux/amd64 and exports it as $PLATFORMS, overriding the bake default.
-          platforms: linux/amd64,linux/arm64
           image_name: ${{ steps.detect.outputs.image_name }}
       # Default-branch push (or manual dispatch): version + release.
       - if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
-        uses: magmamoose/diatreme@0659f96503421d14269b30b1374b7da8aa4f5dd9 # v2.3.0
+        uses: magmamoose/diatreme@f31adec7d62907cc81b9b880cd776e24fcdcbaf1 # v2.0.0
         with:
           mode: release
-          platforms: linux/amd64,linux/arm64
           versioning-tool: gitversion
           environment: prod
           environments: '["prod"]'
