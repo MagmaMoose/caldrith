@@ -157,6 +157,69 @@ async def test_provisions_when_absent_opens_pr() -> None:
 
 
 @respx.mock
+async def test_heals_stale_slash_branch_directory_conflict() -> None:
+    # A leftover ci/caldrith/managed-files/staging ref (Caldrith's retired slash naming)
+    # makes ci/caldrith/managed-files a *directory* in the ref store, so creating the flat
+    # branch 422s with "cannot lock ref". The provisioner must delete the stale nested ref
+    # and retry — WITHOUT touching the ci/caldrith/managed-files-staging hyphen sibling that
+    # merely shares the name prefix — so the repo still gets its PR instead of silently
+    # falling out of sync for every base.
+    _mock_repo()
+    respx.get(_CONTENTS, params={"ref": "main"}).mock(return_value=httpx.Response(404))
+    _no_branch()
+    respx.get(_BRANCH_REF).mock(return_value=httpx.Response(404))  # flat branch absent
+    respx.get(_MAIN_REF).mock(
+        return_value=httpx.Response(200, json={"object": {"sha": "deadbeef"}})
+    )
+    create_ref = respx.post(_REFS).mock(
+        side_effect=[
+            httpx.Response(  # directory/file conflict caused by the nested slash ref
+                422,
+                json={
+                    "message": (
+                        "cannot lock ref 'refs/heads/ci/caldrith/managed-files': "
+                        "'refs/heads/ci/caldrith/managed-files/staging' exists"
+                    )
+                },
+            ),
+            httpx.Response(201, json={}),  # retry succeeds once the nested ref is gone
+        ]
+    )
+    matching = respx.get(f"{_REPO}/git/matching-refs/heads/{_BRANCH}").mock(
+        return_value=httpx.Response(
+            200,
+            json=[
+                {"ref": f"refs/heads/{_BRANCH}/staging"},  # the nested slash leftover
+                {"ref": f"refs/heads/{_STAGING_BRANCH}"},  # hyphen sibling — must survive
+            ],
+        )
+    )
+    del_slash = respx.delete(f"{_REPO}/git/refs/heads/{_BRANCH}/staging").mock(
+        return_value=httpx.Response(204)
+    )
+    del_sibling = respx.delete(f"{_REPO}/git/refs/heads/{_STAGING_BRANCH}").mock(
+        return_value=httpx.Response(204)
+    )
+    respx.get(_CONTENTS, params={"ref": _BRANCH}).mock(return_value=httpx.Response(404))
+    commit = _mock_commit()
+    respx.get(_PULLS).mock(return_value=httpx.Response(200, json=[]))
+    create_pr = respx.post(_PULLS).mock(
+        return_value=httpx.Response(201, json={"html_url": "https://github.com/acme/widget/pull/1"})
+    )
+
+    async with GitHub("token") as client:
+        [result] = await FileProvisioner(client).apply(TargetRepo("acme", "widget"), [_managed()])
+
+    assert matching.called
+    assert del_slash.called  # stale nested slash ref dropped
+    assert not del_sibling.called  # hyphen sibling left untouched
+    assert create_ref.call_count == 2  # 422, then success after the heal
+    assert commit.called and create_pr.called
+    assert result.pr_url == "https://github.com/acme/widget/pull/1"
+    assert result.applied is True
+
+
+@respx.mock
 async def test_noop_when_already_matching() -> None:
     _mock_repo()
     respx.get(_CONTENTS, params={"ref": "main"}).mock(return_value=_file(CONTENT))  # matches

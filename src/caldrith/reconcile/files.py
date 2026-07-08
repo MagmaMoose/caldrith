@@ -245,12 +245,63 @@ class FileProvisioner:
                 return None  # empty repo: the default branch has no commit
             raise
         sha = base_ref["object"]["sha"]
-        await self._client.rest.git.async_create_ref(
-            owner=target.owner,
-            repo=target.name,
-            data={"ref": f"refs/heads/{branch}", "sha": sha},
-        )
+        await self._create_branch_ref(target, branch, sha)
         return sha
+
+    async def _create_branch_ref(self, target: TargetRepo, branch: str, sha: str) -> None:
+        """Create ``refs/heads/{branch}`` at ``sha``, self-healing a directory/file conflict.
+
+        A ref left nested under ``refs/heads/{branch}/`` — from Caldrith's retired
+        ``ci/caldrith/managed-files/<base>`` slash naming (see :func:`_managed_branch`) —
+        makes ``{branch}`` a *directory* in the ref store, so creating the flat ref 422s
+        with ``cannot lock ref``. Unhandled, that aborts the repo's whole files tier (the
+        default base is provisioned first, in :meth:`apply`), so *no* managed PR opens for
+        *any* base and the repo silently falls out of sync. On that 422, drop the stale
+        nested refs (Caldrith's own, hence safe) and retry once; a 422 from any other cause,
+        or one that leaves nothing to delete, is re-raised unchanged.
+        """
+        data = {"ref": f"refs/heads/{branch}", "sha": sha}
+        try:
+            await self._client.rest.git.async_create_ref(
+                owner=target.owner, repo=target.name, data=data
+            )
+            return
+        except RequestFailed as exc:
+            if exc.response.status_code != 422:
+                raise
+            if not await self._delete_nested_refs(target, branch):
+                raise  # not the slash-branch conflict — surface the original 422
+        await self._client.rest.git.async_create_ref(
+            owner=target.owner, repo=target.name, data=data
+        )
+
+    async def _delete_nested_refs(self, target: TargetRepo, branch: str) -> list[str]:
+        """Delete Caldrith's own refs nested under ``refs/heads/{branch}/``; return their names.
+
+        These are leftovers from the retired ``ci/caldrith/managed-files/<base>`` slash
+        naming. They live inside Caldrith's own ``ci/caldrith/managed-files`` namespace —
+        never a user branch — so dropping them is safe, and it auto-closes any superseded
+        stale managed PR. The strict ``refs/heads/{branch}/`` prefix filter matches only
+        true children, so a ``{branch}-<base>`` *hyphen* sibling (the current scheme) is
+        never touched even though it shares the ``{branch}`` string prefix.
+        """
+        nested_prefix = f"refs/heads/{branch}/"
+        matched = response_json(
+            await self._client.rest.git.async_list_matching_refs(
+                owner=target.owner, repo=target.name, ref=f"heads/{branch}"
+            )
+        )
+        deleted: list[str] = []
+        for entry in matched:
+            full_ref = entry.get("ref", "")
+            if not full_ref.startswith(nested_prefix):
+                continue  # the flat ref itself, or a `{branch}-<base>` hyphen sibling
+            name = full_ref.removeprefix("refs/")  # heads/ci/caldrith/managed-files/staging
+            await self._client.rest.git.async_delete_ref(
+                owner=target.owner, repo=target.name, ref=name
+            )
+            deleted.append(name)
+        return deleted
 
     async def _ensure_pr(self, target: TargetRepo, base: str, branch: str) -> str:
         """Return the URL of the managed PR for ``branch``, opening one if none is open."""
