@@ -2,6 +2,20 @@
 
 <!-- version list -->
 
+## v1.13.4 (2026-07-08)
+
+### Bug Fixes
+
+- **pr_update**: Tolerate a failing behind-check, don't abort the sweep
+  ([#45](https://github.com/MagmaMoose/caldrith/pull/45),
+  [`b6fd83d`](https://github.com/MagmaMoose/caldrith/commit/b6fd83dc2089c9c1df76faf9e6171d918e010dea))
+
+### Chores
+
+- Update caldrith image
+  ([`c1318db`](https://github.com/MagmaMoose/caldrith/commit/c1318db44e13c5397f6c62e12ccd693979e71893))
+
+
 ## v1.13.3 (2026-07-08)
 
 ### Bug Fixes
