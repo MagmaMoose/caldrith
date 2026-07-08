@@ -91,7 +91,16 @@ async def update_open_prs(client: GitHub[Any], *, owner: str, repo: str) -> Upda
         number = pr.get("number")
         if number is None:
             continue
-        if not await _is_behind(client, owner, repo, pr):
+        try:
+            behind = await _is_behind(client, owner, repo, pr)
+        except RequestFailed as exc:
+            # The behind-check compares commits; a fork head the App cannot read, a
+            # deleted head branch (404), or a transient error must not abort the whole
+            # sweep — record and move on, same as the update step below (see docstring).
+            summary.skipped.append(number)
+            log.info("pr_update.skipped", pr=number, status=exc.response.status_code)
+            continue
+        if not behind:
             summary.up_to_date.append(number)
             continue
         try:
