@@ -163,6 +163,7 @@ async def _reconcile_actions(
                         ),
                     },
                 )
+    result.applied = result.changed and not dry_run
     return result
 
 
@@ -270,6 +271,7 @@ async def _reconcile_rulesets(
                         ruleset_id=current["id"],
                         data=body,  # type: ignore[arg-type]
                     )
+    result.applied = result.changed and not dry_run
     return result
 
 
