@@ -2,6 +2,23 @@
 
 <!-- version list -->
 
+## v1.13.3 (2026-07-08)
+
+### Bug Fixes
+
+- **org**: Set applied flag after live actions/rulesets writes
+  ([#44](https://github.com/MagmaMoose/caldrith/pull/44),
+  [`9740276`](https://github.com/MagmaMoose/caldrith/commit/9740276b09f405a53e215adaa43eebf817f01cfa))
+
+### Chores
+
+- Provision required workflows (caldrith) ([#33](https://github.com/MagmaMoose/caldrith/pull/33),
+  [`66c0fc2`](https://github.com/MagmaMoose/caldrith/commit/66c0fc2e54844a811355326683a7d65984ef3958))
+
+- Update caldrith image
+  ([`1234456`](https://github.com/MagmaMoose/caldrith/commit/12344569ecf8b22b5bb13c7687c795e7eb4797f1))
+
+
 ## v1.13.2 (2026-07-08)
 
 ### Bug Fixes
