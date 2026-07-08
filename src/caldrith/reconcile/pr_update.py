@@ -87,6 +87,7 @@ async def update_open_prs(client: GitHub[Any], *, owner: str, repo: str) -> Upda
     log = bind_context(_log, repo=f"{owner}/{repo}")
     summary = UpdateSummary(repo=repo)
 
+
     for pr in await _list_open_prs(client, owner, repo):
         number = pr.get("number")
         if number is None:
