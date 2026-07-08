@@ -81,6 +81,28 @@ async def test_conflict_pr_is_skipped_not_fatal() -> None:
 
 
 @respx.mock
+async def test_compare_failure_is_skipped_not_fatal() -> None:
+    # The behind-check (compare_commits) itself can fail — e.g. a fork head the App can't
+    # read or a deleted head branch (404). That must be skipped, not abort the sweep, so a
+    # later healthy PR is still updated.
+    _mock_pulls(_pr(11, head="forky"), _pr(12, head="normal"))
+    respx.get("https://api.github.com/repos/acme/admin/compare/main...acme:forky").mock(
+        return_value=httpx.Response(404, json={"message": "Not Found"})
+    )
+    _mock_compare("main", "normal", behind_by=2)
+    update12 = respx.put(f"{_PULLS}/12/update-branch").mock(
+        return_value=httpx.Response(202, json={})
+    )
+
+    summary = await update_open_prs(GitHub("token"), owner="acme", repo="admin")
+
+    assert update12.called
+    assert summary.updated == [12]
+    assert summary.skipped == [11]
+    assert summary.up_to_date == []
+
+
+@respx.mock
 async def test_no_open_prs_is_a_noop() -> None:
     _mock_pulls()
 
