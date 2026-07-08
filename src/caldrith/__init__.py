@@ -11,4 +11,4 @@ heavy reconcile work runs in the ARQ worker (:mod:`caldrith.worker`), fanning ou
 job per repository for full-account syncs.
 """
 
-__version__ = "1.13.1"
+__version__ = "1.13.2"

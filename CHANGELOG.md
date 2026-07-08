@@ -2,6 +2,26 @@
 
 <!-- version list -->
 
+## v1.13.2 (2026-07-08)
+
+### Bug Fixes
+
+- **files**: Self-heal stale slash-branch directory/file conflict
+  ([#42](https://github.com/MagmaMoose/caldrith/pull/42),
+  [`1d44531`](https://github.com/MagmaMoose/caldrith/commit/1d445312c71a1989f852e410c16cff2465cbebea))
+
+### Build System
+
+- **deps**: Bump the github-actions group with 2 updates
+  ([#41](https://github.com/MagmaMoose/caldrith/pull/41),
+  [`93a7a95`](https://github.com/MagmaMoose/caldrith/commit/93a7a950a97d627399f8847d17fcbff9980edd91))
+
+### Chores
+
+- Update caldrith image
+  ([`9e8b999`](https://github.com/MagmaMoose/caldrith/commit/9e8b999f55cd543b9cdf63aa1363cdae4b09b599))
+
+
 ## v1.13.1 (2026-07-01)
 
 ### Bug Fixes
