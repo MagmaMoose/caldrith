@@ -2,6 +2,20 @@
 
 <!-- version list -->
 
+## v1.13.5 (2026-07-11)
+
+### Bug Fixes
+
+- **milestones**: Compare due_on by date, not raw timestamp
+  ([#46](https://github.com/MagmaMoose/caldrith/pull/46),
+  [`b7a56b3`](https://github.com/MagmaMoose/caldrith/commit/b7a56b3e8a12300a06bda9f7af2658b6f6ab2784))
+
+### Chores
+
+- Update caldrith image
+  ([`e05d072`](https://github.com/MagmaMoose/caldrith/commit/e05d072c87b6f3156f5e1b8235d321b9c7ce9ca4))
+
+
 ## v1.13.4 (2026-07-08)
 
 ### Bug Fixes
