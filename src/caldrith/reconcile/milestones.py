@@ -45,12 +45,23 @@ def _body(desired: Milestone) -> dict[str, Any]:
     return body
 
 
+def _due_date(value: str | None) -> str | None:
+    """The ``YYYY-MM-DD`` date portion of an ISO-8601 date/datetime (or ``None``).
+
+    GitHub snaps a milestone ``due_on`` to a fixed time-of-day and echoes it back as a full
+    timestamp — send ``2024-01-01`` and the API returns ``2024-01-01T08:00:00Z``. Comparing
+    the raw strings would report drift on every reconcile and re-``PATCH`` forever, so we
+    compare only the date, which is all a milestone due date actually carries.
+    """
+    return value[:10] if value else None
+
+
 def _drifted(desired: Milestone, live: dict[str, Any]) -> bool:
     if desired.state is not None and desired.state != live.get("state"):
         return True
     if desired.description is not None and desired.description != (live.get("description") or ""):
         return True
-    return desired.due_on is not None and desired.due_on != live.get("due_on")
+    return desired.due_on is not None and _due_date(desired.due_on) != _due_date(live.get("due_on"))
 
 
 async def reconcile(
