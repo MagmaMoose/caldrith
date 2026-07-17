@@ -2,6 +2,23 @@
 
 <!-- version list -->
 
+## v1.13.6 (2026-07-17)
+
+### Bug Fixes
+
+- Update src/caldrith/reconcile/files.py ([#48](https://github.com/MagmaMoose/caldrith/pull/48),
+  [`0c0f9f1`](https://github.com/MagmaMoose/caldrith/commit/0c0f9f12ff539be2c72c5a5bfbcd7fc7c3e1cfab))
+
+- **files**: Never bump a managed version backwards; close downgrade-only PRs
+  ([#48](https://github.com/MagmaMoose/caldrith/pull/48),
+  [`0c0f9f1`](https://github.com/MagmaMoose/caldrith/commit/0c0f9f12ff539be2c72c5a5bfbcd7fc7c3e1cfab))
+
+### Chores
+
+- Update caldrith image
+  ([`87121fd`](https://github.com/MagmaMoose/caldrith/commit/87121fdf84dcda84b90dfaff437289c22b313c79))
+
+
 ## v1.13.5 (2026-07-11)
 
 ### Bug Fixes
