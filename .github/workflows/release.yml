@@ -59,7 +59,7 @@ jobs:
           fi
       # PR: verify the image builds (image repos only).
       - if: github.event_name == 'pull_request' && steps.detect.outputs.image_name != ''
-        uses: magmamoose/diatreme@0659f96503421d14269b30b1374b7da8aa4f5dd9 # v2.3.0
+        uses: magmamoose/diatreme@4afdae8a7815a259ae72a7cd47336d4bcd3a766e # v2.4.5
         with:
           mode: ci
           # Build for arm64 too (OCI Ampere nodes), not just amd64. The bake file
@@ -69,7 +69,7 @@ jobs:
           image_name: ${{ steps.detect.outputs.image_name }}
       # Default-branch push (or manual dispatch): version + release.
       - if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
-        uses: magmamoose/diatreme@0659f96503421d14269b30b1374b7da8aa4f5dd9 # v2.3.0
+        uses: magmamoose/diatreme@4afdae8a7815a259ae72a7cd47336d4bcd3a766e # v2.4.5
         with:
           mode: release
           platforms: linux/amd64,linux/arm64

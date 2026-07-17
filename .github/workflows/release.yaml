@@ -45,7 +45,7 @@ jobs:
       pull-requests: write
       id-token: write   # OIDC for the public-app token broker
     steps:
-      - uses: magmamoose/diatreme@0659f96503421d14269b30b1374b7da8aa4f5dd9 # v2.3.0
+      - uses: magmamoose/diatreme@4afdae8a7815a259ae72a7cd47336d4bcd3a766e # v2.4.5
         with:
           mode: release
           # Single-environment service: only `prod` exists.
