@@ -671,6 +671,11 @@ def test_repo_is_ahead_detects_image_tags_and_tag_pins() -> None:
     admin_img = _deploy("ghcr.io/magmamoose/caldrith", "2.3.0")
     assert _repo_is_ahead(_deploy("ghcr.io/magmamoose/caldrith", "2.4.2"), admin_img) is True
     assert _repo_is_ahead(_deploy("ghcr.io/magmamoose/caldrith", "2.3.0"), admin_img) is False
+    # A registry with an explicit port (``host:5000/name``) still matches — the ``:`` in the
+    # image-name class is what makes the port-qualified reference detectable, not the tag split.
+    admin_port = _deploy("registry.example.com:5000/app", "2.3.0")
+    assert _repo_is_ahead(_deploy("registry.example.com:5000/app", "2.4.2"), admin_port) is True
+    assert _repo_is_ahead(_deploy("registry.example.com:5000/app", "2.3.0"), admin_port) is False
     # A tag-pinned action (no SHA) is compared the same way.
     admin_tag = _wf_tag("magmamoose/diatreme", "2.3.0")
     assert _repo_is_ahead(_wf_tag("magmamoose/diatreme", "2.4.2"), admin_tag) is True

@@ -115,8 +115,8 @@ _ACTION_TAG_RE = re.compile(r"uses:\s*([\w.-]+/[\w.-]+)@v?(\d+(?:\.\d+){1,2})(?!
 # Container image tag: ``image: registry/owner/name:vX.Y.Z`` (optionally a ``- image:`` list
 # item or quoted). Anchored on the ``image:`` key at line start so it never matches a ``uses:``
 # SHA or an unrelated ``key: value`` — the tag is what Flux / Renovate bump.
+_IMAGE_RE = re.compile(
     r"^\s*(?:-\s*)?image:\s*[\"']?([\w./:@-]+):v?(\d+(?:\.\d+){1,2})(?![\w.])", re.MULTILINE
-    r"^\s*(?:-\s*)?image:\s*[\"']?([\w./-]+):v?(\d+(?:\.\d+){1,2})(?![\w.])", re.MULTILINE
 )
 
 
