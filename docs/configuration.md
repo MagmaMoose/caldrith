@@ -1054,21 +1054,24 @@ deleted** rather than left dangling.
 | `path` | required | Repo-relative path of the file to provision (e.g. `.github/workflows/gate.yml`). |
 | `content` | required | Full file body caldrith writes; a matching file is skipped, a drifted one updated (unless `create_only`). |
 | `create_only` | `false` | When `true`, provision only when absent and never overwrite; a `.yml`/`.yaml` sibling counts as present. |
-| `upgrade_only` | `false` | When `true`, never **downgrade** a SHA-pinned action: if the repo pins any action this file declares (`uses: owner/repo@<sha> # vX.Y.Z`) at a *newer* version, the file is left as-is. |
+| `allow_downgrade` | `false` | Downgrade protection is **on by default** (see the tip below). Set `true` only to let an intentional org-wide **rollback** through — it lifts the guard so a newer repo pin is reverted to the older baseline. |
+| `upgrade_only` | `false` | **Deprecated / no-op.** Downgrade protection is now unconditional, so this flag no longer changes anything; it is still accepted so existing configs don't break. |
 | `skip_repos` | — | Repo-name globs to exclude THIS file from (a matched repo is skipped and any prior managed copy pruned). |
 | `branches` | `[default]` | Base branches to provision into, each via its own managed PR; the `default` sentinel = the repo's default branch. E.g. `[default, staging]`. A repo missing a listed branch is skipped for that branch alone. |
 
-!!! tip "`upgrade_only` — don't fight Dependabot / Renovate"
+!!! tip "Never bumps a version backwards — don't fight Dependabot / Renovate / Flux"
     A synced file (not `create_only`) is normally rewritten to `content` on any drift — so
-    when Dependabot or Renovate bumps a SHA-pinned action in a repo, the next reconcile
-    would **revert it to the admin baseline (a downgrade)** and open a PR to do so. Set
-    `upgrade_only: true` on such files (e.g. the Chargate / Diatreme workflows): caldrith
-    compares the `# vX.Y.Z` version comment on each action the file declares and, if the
-    repo is *ahead* on any of them, leaves the file alone. It still syncs when the repo is
-    **behind** (an upgrade to the baseline) or when **non-version** content drifts at the
-    same version. Caveat: because the whole file is replaced or skipped as a unit, a repo
-    that's ahead on one action blocks baseline changes to the *others* until the admin
-    `content` catches up — and intentional org-wide **rollbacks** need the flag removed.
+    when a bot bumps a pinned version in a repo, a naive reconcile would **revert it to the
+    admin baseline (a downgrade, e.g. `v2.4.2` → `v2.3.0`)** and open a PR to do so. caldrith
+    guards against this **for every managed file, automatically**: it compares each version
+    the file declares — SHA-pinned actions (`uses: owner/repo@<sha> # vX.Y.Z`), tag-pinned
+    actions (`uses: owner/repo@vX.Y.Z`) and container image tags
+    (`image: registry/owner/name:vX.Y.Z`) — and if the repo is *ahead* on any of them, leaves
+    the file alone. It still syncs when the repo is **behind** (an upgrade to the baseline) or
+    when **non-version** content drifts at the same version. Two caveats: because the whole
+    file is replaced or skipped as a unit, a repo that's ahead on one reference blocks baseline
+    changes to the *others* until the admin `content` catches up; and an intentional org-wide
+    **rollback** needs `allow_downgrade: true` on that file.
 
 ## The `organization:` block
 

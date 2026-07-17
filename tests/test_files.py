@@ -15,6 +15,7 @@ from caldrith.config.schema import ManagedFile, SafeSettingsConfig
 from caldrith.reconcile.files import (
     FileProvisioner,
     _managed_branch,
+    _pinned_versions,
     _repo_is_ahead,
     _resolve_bases,
     reconcile,
@@ -25,6 +26,16 @@ from caldrith.reconcile.planner import TargetRepo
 def _wf(action: str, version: str, sha: str = "a" * 40) -> str:
     """A tiny workflow file pinning one SHA-pinned action with a ``# vX.Y.Z`` comment."""
     return f"name: W\njobs:\n  j:\n    steps:\n      - uses: {action}@{sha} # v{version}\n"
+
+
+def _wf_tag(action: str, version: str) -> str:
+    """A workflow pinning one *tag*-pinned action (``uses: action@vX.Y.Z``, no SHA)."""
+    return f"name: W\njobs:\n  j:\n    steps:\n      - uses: {action}@v{version}\n"
+
+
+def _deploy(image: str, version: str) -> str:
+    """A manifest snippet pinning one container image tag (``image: image:vX.Y.Z``)."""
+    return f"spec:\n  containers:\n    - name: app\n      image: {image}:v{version}\n"
 
 
 _REPO = "https://api.github.com/repos/acme/widget"
@@ -654,10 +665,133 @@ def test_repo_is_ahead_compares_pinned_action_versions() -> None:
     assert _repo_is_ahead("name: W\n", admin) is False  # no pins
 
 
+def test_repo_is_ahead_detects_image_tags_and_tag_pins() -> None:
+    # A container image tag bumped past the baseline is a downgrade too (the v2.4.2 -> v2.3.0
+    # case): the guard must catch it, not just SHA-pinned actions.
+    admin_img = _deploy("ghcr.io/magmamoose/caldrith", "2.3.0")
+    assert _repo_is_ahead(_deploy("ghcr.io/magmamoose/caldrith", "2.4.2"), admin_img) is True
+    assert _repo_is_ahead(_deploy("ghcr.io/magmamoose/caldrith", "2.3.0"), admin_img) is False
+    # A tag-pinned action (no SHA) is compared the same way.
+    admin_tag = _wf_tag("magmamoose/diatreme", "2.3.0")
+    assert _repo_is_ahead(_wf_tag("magmamoose/diatreme", "2.4.2"), admin_tag) is True
+    assert _repo_is_ahead(_wf_tag("magmamoose/diatreme", "2.3.0"), admin_tag) is False
+
+
+def test_pinned_versions_extracts_every_pin_style() -> None:
+    content = (
+        _wf("actions/checkout", "7.0.0")
+        + _wf_tag("magmamoose/diatreme", "2.3.0")
+        + _deploy("ghcr.io/magmamoose/caldrith", "1.13.5")
+    )
+    assert _pinned_versions(content) == {
+        "uses:actions/checkout": (7, 0, 0),
+        "uses:magmamoose/diatreme": (2, 3, 0),
+        "image:ghcr.io/magmamoose/caldrith": (1, 13, 5),
+    }
+
+
 @respx.mock
-async def test_upgrade_only_skips_when_repo_pin_is_ahead() -> None:
-    # Dependabot / Renovate bumped chargate in the repo past the admin baseline — caldrith
-    # must NOT revert it (no downgrade).
+async def test_downgrade_protection_is_on_by_default() -> None:
+    # Dependabot / Renovate bumped chargate in the repo past the admin baseline. With no flag
+    # set, caldrith must NOT revert it — downgrade protection is now unconditional.
+    admin = _wf("magmamoose/chargate", "2.1.0")
+    _mock_repo()
+    respx.get(_CONTENTS, params={"ref": "main"}).mock(
+        return_value=_file(_wf("magmamoose/chargate", "2.2.0", "c" * 40))
+    )
+    _no_branch()
+    commit = _mock_commit()
+
+    managed = ManagedFile(path=_PATH, content=admin)
+    async with GitHub("token") as client:
+        [result] = await FileProvisioner(client).apply(TargetRepo("acme", "widget"), [managed])
+
+    assert result.files == [] and result.changed is False
+    assert not commit.called  # nothing provisioned -> no commit, no downgrade PR
+
+
+@respx.mock
+async def test_downgrade_protection_covers_image_tags() -> None:
+    # Flux bumped the caldrith image tag in the repo past the baseline (v2.4.2 > v2.3.0);
+    # caldrith must not bump it backwards to v2.3.0.
+    admin = _deploy("ghcr.io/magmamoose/caldrith", "2.3.0")
+    _mock_repo()
+    respx.get(_CONTENTS, params={"ref": "main"}).mock(
+        return_value=_file(_deploy("ghcr.io/magmamoose/caldrith", "2.4.2"))
+    )
+    _no_branch()
+    commit = _mock_commit()
+
+    managed = ManagedFile(path=_PATH, content=admin)
+    async with GitHub("token") as client:
+        [result] = await FileProvisioner(client).apply(TargetRepo("acme", "widget"), [managed])
+
+    assert result.files == [] and result.changed is False
+    assert not commit.called  # image tag left ahead -> no backwards bump
+
+
+@respx.mock
+async def test_allow_downgrade_permits_intentional_rollback() -> None:
+    # An intentional org-wide rollback: the repo is ahead, but allow_downgrade lets caldrith
+    # revert it to the (older) baseline anyway.
+    admin = _wf("magmamoose/chargate", "2.1.0")
+    _mock_repo()
+    respx.get(_CONTENTS, params={"ref": "main"}).mock(
+        return_value=_file(_wf("magmamoose/chargate", "2.2.0", "c" * 40))
+    )
+    _no_branch()
+
+    managed = ManagedFile(path=_PATH, content=admin, allow_downgrade=True)
+    async with GitHub("token") as client:
+        [result] = await FileProvisioner(client, dry_run=True).apply(
+            TargetRepo("acme", "widget"), [managed]
+        )
+
+    assert result.files == [_PATH]  # allow_downgrade -> the rollback is applied
+
+
+@respx.mock
+async def test_updates_when_repo_pin_is_behind() -> None:
+    admin = _wf("magmamoose/chargate", "2.2.0")
+    _mock_repo()
+    respx.get(_CONTENTS, params={"ref": "main"}).mock(
+        return_value=_file(_wf("magmamoose/chargate", "2.1.0", "c" * 40))
+    )
+    _no_branch()
+
+    managed = ManagedFile(path=_PATH, content=admin)
+    async with GitHub("token") as client:
+        [result] = await FileProvisioner(client, dry_run=True).apply(
+            TargetRepo("acme", "widget"), [managed]
+        )
+
+    assert result.files == [_PATH]  # repo behind the baseline -> upgrade it
+
+
+@respx.mock
+async def test_still_syncs_non_version_drift() -> None:
+    # Same pinned version, but the admin content changed elsewhere -> repo isn't "ahead",
+    # so the file is still synced (the guard only blocks *downgrades*).
+    admin = _wf("magmamoose/chargate", "2.1.0") + "permissions:\n  contents: read\n"
+    _mock_repo()
+    respx.get(_CONTENTS, params={"ref": "main"}).mock(
+        return_value=_file(_wf("magmamoose/chargate", "2.1.0", "c" * 40))
+    )
+    _no_branch()
+
+    managed = ManagedFile(path=_PATH, content=admin)
+    async with GitHub("token") as client:
+        [result] = await FileProvisioner(client, dry_run=True).apply(
+            TargetRepo("acme", "widget"), [managed]
+        )
+
+    assert result.files == [_PATH]  # same version, other drift -> sync
+
+
+@respx.mock
+async def test_upgrade_only_flag_still_accepted_for_backcompat() -> None:
+    # The deprecated upgrade_only flag is still accepted (extra=forbid would else reject it)
+    # and behaves like the now-default protection: a repo that's ahead is left alone.
     admin = _wf("magmamoose/chargate", "2.1.0")
     _mock_repo()
     respx.get(_CONTENTS, params={"ref": "main"}).mock(
@@ -670,46 +804,78 @@ async def test_upgrade_only_skips_when_repo_pin_is_ahead() -> None:
     async with GitHub("token") as client:
         [result] = await FileProvisioner(client).apply(TargetRepo("acme", "widget"), [managed])
 
-    assert result.files == [] and result.changed is False
-    assert not commit.called  # nothing provisioned -> no commit, no downgrade PR
+    assert result.files == [] and not commit.called
 
 
 @respx.mock
-async def test_upgrade_only_updates_when_repo_pin_is_behind() -> None:
-    admin = _wf("magmamoose/chargate", "2.2.0")
+async def test_downgrade_only_managed_pr_is_closed() -> None:
+    # An already-open managed PR whose only change is a backwards version bump (the repo is
+    # now ahead of the baseline) must be CLOSED, not left dangling — the branch is dropped
+    # wholesale, exactly like a fully-pruned PR.
+    admin = _wf("magmamoose/chargate", "2.3.0")
     _mock_repo()
-    respx.get(_CONTENTS, params={"ref": "main"}).mock(
-        return_value=_file(_wf("magmamoose/chargate", "2.1.0", "c" * 40))
+    respx.get(_CONTENTS, params={"ref": "main"}).mock(  # repo bumped ahead -> would downgrade
+        return_value=_file(_wf("magmamoose/chargate", "2.4.2", "c" * 40))
     )
-    _no_branch()
-
-    managed = ManagedFile(path=_PATH, content=admin, upgrade_only=True)
-    async with GitHub("token") as client:
-        [result] = await FileProvisioner(client, dry_run=True).apply(
-            TargetRepo("acme", "widget"), [managed]
+    _compare((_PATH, "modified"))  # the branch still carries the stale downgrade proposal
+    commit = _mock_commit()
+    respx.get(_PULLS).mock(
+        return_value=httpx.Response(
+            200, json=[{"number": 9, "html_url": "https://github.com/acme/widget/pull/9"}]
         )
+    )
+    close = respx.patch(f"{_PULLS}/9").mock(return_value=httpx.Response(200, json={}))
+    delete_ref = respx.delete(_REF).mock(return_value=httpx.Response(204))
 
-    assert result.files == [_PATH]  # repo behind the baseline -> upgrade it
+    managed = ManagedFile(path=_PATH, content=admin)
+    async with GitHub("token") as client:
+        [result] = await FileProvisioner(client).apply(TargetRepo("acme", "widget"), [managed])
+
+    assert close.called and b"closed" in close.calls.last.request.content
+    assert delete_ref.called and not commit.called  # branch dropped, no downgrade committed
+    assert result.files == [] and result.removed == [_PATH]
+    assert result.closed_pr_url == "https://github.com/acme/widget/pull/9"
+    assert result.applied is True
 
 
 @respx.mock
-async def test_upgrade_only_still_syncs_non_version_drift() -> None:
-    # Same pinned version, but the admin content changed elsewhere -> repo isn't "ahead",
-    # so the file is still synced (upgrade_only only guards against *downgrades*).
-    admin = _wf("magmamoose/chargate", "2.1.0") + "permissions:\n  contents: read\n"
+async def test_downgrade_pruned_but_legit_change_keeps_pr_open() -> None:
+    # The managed PR carries a legit update (security.yml) AND a backwards bump (release.yml,
+    # repo now ahead). The downgrade is pruned (reverted to the repo's own content) while the
+    # PR stays open with the legit change — a fresh managed file still opens/updates the PR.
+    rel = ".github/workflows/release.yml"
+    rel_url = f"{_REPO}/contents/{rel}"
+    admin_rel = _wf("magmamoose/diatreme", "2.3.0")
+    repo_rel_ahead = _wf("magmamoose/diatreme", "2.4.2", "c" * 40)
     _mock_repo()
-    respx.get(_CONTENTS, params={"ref": "main"}).mock(
-        return_value=_file(_wf("magmamoose/chargate", "2.1.0", "c" * 40))
+    # security.yml drifted on the base -> a real update (kept); release.yml is ahead -> skipped.
+    respx.get(_CONTENTS, params={"ref": "main"}).mock(return_value=_file("drifted"))
+    respx.get(rel_url, params={"ref": "main"}).mock(return_value=_file(repo_rel_ahead))
+    _compare((_PATH, "modified"), (rel, "modified"))
+    _branch_exists()
+    respx.get(_CONTENTS, params={"ref": _BRANCH}).mock(return_value=_file(CONTENT, sha="secsha"))
+    respx.get(rel_url, params={"ref": _BRANCH}).mock(return_value=_file(admin_rel, sha="relsha"))
+    commit = _mock_commit()
+    respx.get(_PULLS).mock(
+        return_value=httpx.Response(
+            200, json=[{"number": 9, "html_url": "https://github.com/acme/widget/pull/9"}]
+        )
     )
-    _no_branch()
 
-    managed = ManagedFile(path=_PATH, content=admin, upgrade_only=True)
+    security = ManagedFile(path=_PATH, content=CONTENT)
+    release = ManagedFile(path=rel, content=admin_rel)
     async with GitHub("token") as client:
-        [result] = await FileProvisioner(client, dry_run=True).apply(
-            TargetRepo("acme", "widget"), [managed]
+        [result] = await FileProvisioner(client).apply(
+            TargetRepo("acme", "widget"), [security, release]
         )
 
-    assert result.files == [_PATH]  # same version, other drift -> sync
+    # The downgrade is reverted to the repo's own (ahead) content, not committed as a bump;
+    # security.yml is already staged so it isn't re-added. The PR stays open.
+    assert _added_paths(commit) == [rel] and _deleted_paths(commit) == []
+    assert _added_content(commit, rel) == repo_rel_ahead
+    assert result.files == [_PATH] and result.removed == [rel]
+    assert result.pr_url == "https://github.com/acme/widget/pull/9"
+    assert result.closed_pr_url is None and result.applied is True
 
 
 # ---------------------------------------------------------------------------
