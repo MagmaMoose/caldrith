@@ -253,11 +253,14 @@ class ManagedFile(BaseModel):
     an existing one (right for per-repo-customised files like a release workflow);
     the default keeps the file in sync with ``content`` (right for a uniform gate).
 
-    ``upgrade_only`` makes the sync **never downgrade** a SHA-pinned action: if the target
-    repo pins any action the file declares (``uses: owner/repo@<sha> # vX.Y.Z``) at a
-    *newer* version than this ``content`` — i.e. Dependabot / Renovate has bumped it — the
-    file is left as-is instead of reverted. (Without it, a bot bump looks like drift and
-    is overwritten back to the baseline.)
+    The sync **never downgrades** a pinned version: if the target repo pins any reference the
+    file declares — a SHA- or tag-pinned action (``uses: owner/repo@<sha> # vX.Y.Z``) or a
+    container image tag (``image: registry/owner/name:vX.Y.Z``) — at a *newer* version than
+    this ``content`` (i.e. Dependabot / Renovate / Flux has bumped it), the file is left
+    as-is instead of reverted to the baseline. This protection is always on; set
+    ``allow_downgrade`` to permit an intentional org-wide rollback. ``upgrade_only`` is
+    retained for backward compatibility but no longer changes anything — the guard it used to
+    enable is now unconditional.
 
     ``skip_repos`` is a list of repo-name globs to exclude from THIS file only — a
     per-file escape hatch that, unlike ``restrictedRepos``, leaves the repo under all
@@ -276,7 +279,10 @@ class ManagedFile(BaseModel):
     path: str
     content: str
     create_only: bool = False
+    # Deprecated: version-downgrade protection is now unconditional (see the class docstring),
+    # so this flag is accepted for backward compatibility but has no effect.
     upgrade_only: bool = False
+    allow_downgrade: bool = False
     skip_repos: list[str] | None = None
     branches: list[str] | None = None
 

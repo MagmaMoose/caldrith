@@ -18,9 +18,14 @@ Idempotent and non-destructive:
 - ``create_only`` files are written only when absent (never overwrite a repo's own),
   and a ``.yml``/``.yaml`` sibling counts as present — so a managed ``release.yaml``
   won't be added next to a repo's existing ``release.yml``.
-- ``upgrade_only`` files are never *downgraded*: if the repo pins a declared action
-  (``uses: owner/repo@<sha> # vX.Y.Z``) at a newer version than ``content`` (e.g. a
-  Dependabot / Renovate bump), the file is left as-is instead of reverted.
+- Versions are never *downgraded*: if the repo pins any reference the file declares — a
+  SHA- or tag-pinned action (``uses: owner/repo@<sha> # vX.Y.Z``) or a container image tag
+  (``image: registry/owner/name:vX.Y.Z``) — at a newer version than ``content`` (e.g. a
+  Dependabot / Renovate / Flux bump), the file is left as-is instead of reverted. This guard
+  is unconditional; set ``allow_downgrade`` on a file to permit an intentional rollback. A
+  downgrade a prior run had already staged on the managed PR is pruned like any orphan, and
+  the PR is **closed** if that was the only change it carried (it reopens once a genuine
+  change — a new file or a real upgrade — is due).
 - ``skip_repos`` globs exclude a file from specific repos (a per-file escape hatch).
 - An empty repo (no commit on its default branch) is skipped gracefully — there is
   nothing to branch a PR from yet.
@@ -96,9 +101,23 @@ def _b64(text: str) -> str:
     return base64.b64encode(text.encode()).decode()
 
 
-# A SHA-pinned action with a version comment: ``uses: owner/repo@<40-hex> # vX.Y[.Z]`` —
-# the org's pin convention. The trailing ``# vX.Y.Z`` is what Dependabot / Renovate bump.
-_PIN_RE = re.compile(r"uses:\s*([\w.-]+/[\w.-]+)@[0-9a-fA-F]{40}\s*#\s*v?(\d+(?:\.\d+){1,2})")
+# The three version-pin styles a bot (Dependabot / Renovate / Flux) bumps and Caldrith must
+# never revert. A version is ``X.Y`` or ``X.Y.Z`` — a leading ``v`` is optional.
+#
+# SHA-pinned action, the org's convention: ``uses: owner/repo@<40-hex> # vX.Y.Z`` — the
+# trailing ``# vX.Y.Z`` comment tracks the pinned SHA's tag.
+_ACTION_SHA_RE = re.compile(
+    r"uses:\s*([\w.-]+/[\w.-]+)@[0-9a-fA-F]{40}\s*#\s*v?(\d+(?:\.\d+){1,2})"
+)
+# Tag-pinned action (no SHA): ``uses: owner/repo@vX.Y.Z``. A 40-hex SHA never matches (it
+# carries no dots), so this can't double-count a SHA-pinned line.
+_ACTION_TAG_RE = re.compile(r"uses:\s*([\w.-]+/[\w.-]+)@v?(\d+(?:\.\d+){1,2})(?![\w.])")
+# Container image tag: ``image: registry/owner/name:vX.Y.Z`` (optionally a ``- image:`` list
+# item or quoted). Anchored on the ``image:`` key at line start so it never matches a ``uses:``
+# SHA or an unrelated ``key: value`` — the tag is what Flux / Renovate bump.
+_IMAGE_RE = re.compile(
+    r"^\s*(?:-\s*)?image:\s*[\"']?([\w./:@-]+):v?(\d+(?:\.\d+){1,2})(?![\w.])", re.MULTILINE
+)
 
 
 def _semver(version: str) -> tuple[int, int, int]:
@@ -108,22 +127,35 @@ def _semver(version: str) -> tuple[int, int, int]:
     return major, minor, patch
 
 
-def _action_versions(content: str) -> dict[str, tuple[int, int, int]]:
-    """Map ``owner/repo`` -> pinned semver for each SHA-pinned ``uses:`` line."""
-    return {action: _semver(version) for action, version in _PIN_RE.findall(content)}
+def _pinned_versions(content: str) -> dict[str, tuple[int, int, int]]:
+    """Map every version-pinned reference in ``content`` -> its semver, for downgrade checks.
+
+    Covers all three pin styles a bot bumps: SHA-pinned actions, tag-pinned actions and
+    container image tags. Keys are namespaced by kind (``uses:`` / ``image:``) so an action
+    and an image that happen to share a path can't collide.
+    """
+    versions: dict[str, tuple[int, int, int]] = {}
+    for action, version in _ACTION_SHA_RE.findall(content):
+        versions[f"uses:{action}"] = _semver(version)
+    for action, version in _ACTION_TAG_RE.findall(content):
+        versions.setdefault(f"uses:{action}", _semver(version))  # SHA pin (if any) wins
+    for image, version in _IMAGE_RE.findall(content):
+        versions[f"image:{image}"] = _semver(version)
+    return versions
 
 
 def _repo_is_ahead(repo_content: str, admin_content: str) -> bool:
-    """True if the repo pins any of the admin file's actions at a *newer* version.
+    """True if the repo pins any reference the admin file declares at a *newer* version.
 
-    Overwriting would then downgrade that pin — which is exactly what happens after
-    Dependabot / Renovate bumps a SHA-pinned action past the admin baseline. Only actions
-    the admin file declares are compared, so extra actions a repo adds are ignored.
+    Overwriting would then downgrade that pin — a version bumped backwards, exactly what a
+    Dependabot / Renovate action bump or a Flux image-tag bump past the admin baseline looks
+    like. Only references the admin file declares are compared, so extra pins a repo adds on
+    its own are ignored.
     """
-    repo_pins = _action_versions(repo_content)
+    repo_pins = _pinned_versions(repo_content)
     return any(
-        action in repo_pins and repo_pins[action] > admin_version
-        for action, admin_version in _action_versions(admin_content).items()
+        key in repo_pins and repo_pins[key] > admin_version
+        for key, admin_version in _pinned_versions(admin_content).items()
     )
 
 
@@ -504,8 +536,13 @@ class FileProvisioner:
                     continue  # a .yml/.yaml variant already exists — don't duplicate it
                 needed.append(managed)  # absent -> create
             elif content != managed.content and not managed.create_only:
-                if managed.upgrade_only and _repo_is_ahead(content, managed.content):
-                    continue  # a bot bumped a pinned version past the baseline — don't downgrade
+                if not managed.allow_downgrade and _repo_is_ahead(content, managed.content):
+                    # Repo pins a newer version — never bump it backwards. Drop it from the
+                    # desired set so a stale copy a prior run staged on the managed branch is
+                    # pruned like an excluded file (the downgrade is reverted), and the PR is
+                    # closed if that leaves nothing — rather than left open as a downgrade PR.
+                    desired.discard(managed.path)
+                    continue
                 needed.append(managed)  # drifted -> update (create_only files are left alone)
 
         orphans = await self._orphans(target, base, branch, desired)
