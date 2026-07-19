@@ -44,7 +44,10 @@ concurrency:
 
 jobs:
   diatreme:
-    runs-on: ubuntu-latest
+    # Shares the repo's SELFHOSTED_GITHUB_RUNNER toggle (see security.yml):
+    # set it to a self-hosted runner label to run releases on the cluster pool,
+    # unset/blank to stay on GitHub-hosted.
+    runs-on: ${{ vars.SELFHOSTED_GITHUB_RUNNER || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - id: detect
@@ -59,20 +62,15 @@ jobs:
           fi
       # PR: verify the image builds (image repos only).
       - if: github.event_name == 'pull_request' && steps.detect.outputs.image_name != ''
-        uses: magmamoose/diatreme@0659f96503421d14269b30b1374b7da8aa4f5dd9 # v2.3.0
+        uses: magmamoose/diatreme@3a369fa0a0c443d444a3f163c21413065aca9aac # v2.4.6
         with:
           mode: ci
-          # Build for arm64 too (OCI Ampere nodes), not just amd64. The bake file
-          # already defaults to both, but diatreme's platforms input defaults to
-          # linux/amd64 and exports it as $PLATFORMS, overriding the bake default.
-          platforms: linux/amd64,linux/arm64
           image_name: ${{ steps.detect.outputs.image_name }}
       # Default-branch push (or manual dispatch): version + release.
       - if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
-        uses: magmamoose/diatreme@0659f96503421d14269b30b1374b7da8aa4f5dd9 # v2.3.0
+        uses: magmamoose/diatreme@3a369fa0a0c443d444a3f163c21413065aca9aac # v2.4.6
         with:
           mode: release
-          platforms: linux/amd64,linux/arm64
           versioning-tool: gitversion
           environment: prod
           environments: '["prod"]'
